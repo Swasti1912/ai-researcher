@@ -1,0 +1,48 @@
+app:
+  name: ai-researcher
+  stage: dev
+  timezone: Asia/Kolkata
+
+llm:
+  provider: azure_openai   
+  model: gpt-4o-mini      
+  temperature: 0.2
+
+sources:
+  arxiv:
+    enabled: true
+    max_results: 20
+  semantic_scholar:
+    enabled: true
+    max_results: 20
+  openalex:
+    enabled: true
+    max_results: 20
+  crossref:
+    enabled: true
+    max_results: 10
+
+pipelines:
+  pdf_upload:
+    enabled: true
+    related_papers_top_k: 12
+    max_pdf_pages: 50
+  topic_monitor:
+    enabled: true
+    top_k_ranked: 10
+    digest_window_days: 7
+    include_landscape: true
+
+storage:
+  mongo:
+    enabled: true
+    db_name: ai_researcher
+    collections:
+      papers: papers
+      chunks: paper_chunks
+      citation_edges: citation_edges
+      topics: topics
+      digests: digests
+  redis:
+    enabled: true
+    key_prefix: air :
