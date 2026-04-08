@@ -48,13 +48,13 @@ app.add_middleware(
 
 @app.exception_handler(AIResearcherError)
 async def _app_err(_req: Request, exc: AIResearcherError) -> JSONResponse:
-    return JSONResponse(exc.status_code, exc.to_dict())
+    return JSONResponse(content=exc.to_dict(), status_code=exc.status_code)
 
 
 @app.exception_handler(Exception)
 async def _generic(_req: Request, exc: Exception) -> JSONResponse:
     get_logger("main").error("Unhandled", extra={"err": str(exc)})
-    return JSONResponse(500, {"error": "InternalError", "message": str(exc)})
+    return JSONResponse(content={"error": "InternalError", "message": str(exc)}, status_code=500)
 
 
 app.include_router(router)

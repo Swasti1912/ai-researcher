@@ -122,4 +122,5 @@ class BaseAgent(ABC):
         except AgentExecutionError:
             raise
         except Exception as exc:
-            raise AgentExecutionError(self.name, "Unexpected error", str(exc)) from exc
+            _log.error("Agent failed", extra={"agent": str(self.name), "err": str(exc), "type": type(exc).__name__})
+            raise AgentExecutionError(str(self.name), "Unexpected error", str(exc)) from exc

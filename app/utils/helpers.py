@@ -64,6 +64,10 @@ def truncate(text: str, limit: int = 500) -> str:
     return text[: limit - 1] + "…"
 
 
+# Aliases used across agents
+generate_request_id = gen_id
+
+
 def safe_json(raw: str, fallback: Any = None) -> Any:
     """
     Parse JSON from an LLM response, stripping markdown fences.
@@ -81,3 +85,7 @@ def safe_json(raw: str, fallback: Any = None) -> Any:
     except (json.JSONDecodeError, ValueError):
         _log.warning("safe_json parse failed", extra={"preview": s[:200]})
         return fallback
+
+
+# Alias used by agents/base.py and paper agents
+safe_json_parse = safe_json

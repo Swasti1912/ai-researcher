@@ -4,6 +4,7 @@ import QueryInput from './components/QueryInput';
 import Pipeline from './components/Pipeline';
 import Results from './components/Results';
 import Sidebar from './components/Sidebar';
+import PaperMode from './components/PaperMode';
 import { submitResearch, uploadPaper } from './services/api';
 
 const STEPS = [
@@ -17,14 +18,15 @@ const STEPS = [
 ];
 
 export default function App() {
-  const [query, setQuery]       = useState('');
-  const [paper, setPaper]       = useState(null);   // File
-  const [paperInfo, setPaperInfo] = useState(null); // upload response
-  const [loading, setLoading]   = useState(false);
-  const [active, setActive]     = useState(-1);
-  const [done, setDone]         = useState([]);
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState(null);
+  const [mode, setMode]           = useState('research'); // 'research' | 'paper'
+  const [query, setQuery]         = useState('');
+  const [paper, setPaper]         = useState(null);
+  const [paperInfo, setPaperInfo] = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [active, setActive]       = useState(-1);
+  const [done, setDone]           = useState([]);
+  const [result, setResult]       = useState(null);
+  const [error, setError]         = useState(null);
   const timers = useRef([]);
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
@@ -60,22 +62,47 @@ export default function App() {
   return (
     <div className="app">
       <Header />
-      <div className="body">
-        <main className="main">
-          <QueryInput query={query} setQuery={setQuery} onSubmit={handleSubmit}
-            onUpload={handleUpload} paper={paper} loading={loading} />
-          {error && (
-            <div className="card" style={{ borderColor: 'var(--red)' }}>
-              <div className="card-h"><div className="dot d-rd">✕</div><h4>Error</h4></div>
-              <div className="card-b">{error}</div>
-            </div>
-          )}
-          {result && <Results result={result} />}
-        </main>
-        <aside className="side">
-          <Sidebar steps={STEPS} active={active} done={done} loading={loading} result={result} />
-        </aside>
+
+      {/* Mode toggle */}
+      <div className="mode-bar">
+        <button
+          className={`mode-btn ${mode === 'research' ? 'mode-btn-on' : ''}`}
+          onClick={() => setMode('research')}
+        >
+          🔬 Research Mode
+        </button>
+        <button
+          className={`mode-btn ${mode === 'paper' ? 'mode-btn-on' : ''}`}
+          onClick={() => setMode('paper')}
+        >
+          📄 Paper Q&amp;A
+        </button>
       </div>
+
+      {mode === 'research' ? (
+        <div className="body">
+          <main className="main">
+            <QueryInput query={query} setQuery={setQuery} onSubmit={handleSubmit}
+              onUpload={handleUpload} paper={paper} loading={loading} />
+            {error && (
+              <div className="card" style={{ borderColor: 'var(--red)' }}>
+                <div className="card-h"><div className="dot d-rd">✕</div><h4>Error</h4></div>
+                <div className="card-b">{error}</div>
+              </div>
+            )}
+            {result && <Results result={result} />}
+          </main>
+          <aside className="side">
+            <Sidebar steps={STEPS} active={active} done={done} loading={loading} result={result} />
+          </aside>
+        </div>
+      ) : (
+        <div className="body body-full">
+          <main className="main">
+            <PaperMode />
+          </main>
+        </div>
+      )}
     </div>
   );
 }

@@ -20,6 +20,10 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.agents.paper_summarizer import PaperSummarizerAgent
+from app.agents.paper_qa import PaperQAAgent
+from app.agents.paper_visualizer import PaperVisualizerAgent
+from app.agents.paper_teacher import PaperTeacherAgent
 from app.graph import get_graph
 from app.knowledge_base import get_kb
 from app.state import ResearchState
@@ -58,6 +62,7 @@ class ResearchResp(BaseModel):
     agent_trace: List[Dict[str, Any]] = []
 
 class UploadResp(BaseModel):
+    session_id: str
     doc_id: str
     filename: Optional[str] = None
     text_length: int
@@ -76,6 +81,85 @@ class TopoEdge(BaseModel):
     source: str; target: str; label: str = ""; animated: bool = False
 class Topology(BaseModel):
     nodes: List[TopoNode]; edges: List[TopoEdge]
+
+class PaperSummarizeReq(BaseModel):
+    session_id: str  # returned by /upload-paper
+    filename: Optional[str] = None
+
+class KeyConcept(BaseModel):
+    name: str = ""
+    definition: str = ""
+    importance: str = ""
+
+class SectionBreakdown(BaseModel):
+    section: str = ""
+    summary: str = ""
+
+class PaperSummarizeResp(BaseModel):
+    session_id: str = ""
+    doc_id: str = ""
+    filename: Optional[str] = None
+    title: str = ""
+    authors: str = ""
+    domain: str = ""
+    technical_depth: str = ""
+    core_innovation: str = ""
+    tldr: str = ""
+    abstract_summary: str = ""
+    section_breakdown: List[Dict[str, Any]] = []
+    key_concepts: List[Dict[str, Any]] = []
+    methodology: str = ""
+    key_results: str = ""
+    limitations: str = ""
+    future_work: str = ""
+    prior_work_comparison: str = ""
+    key_contributions: List[str] = []  # kept for backwards compat
+
+class PaperAskReq(BaseModel):
+    question: str = Field(..., min_length=1, max_length=5_000)
+    session_id: str  # returned by /upload-paper
+
+class PaperAskResp(BaseModel):
+    question: str = ""
+    answer: str = ""
+    paper_evidence: List[str] = []
+    related_papers: List[Dict[str, Any]] = []
+    confidence: str = "medium"
+    rag_chunks_used: int = 0
+    external_papers_found: int = 0
+    follow_up_questions: List[str] = []
+
+class SessionDeleteResp(BaseModel):
+    session_id: str
+    chunks_deleted: int
+
+class PaperVisualizeReq(BaseModel):
+    session_id: str
+
+class PaperVisualizeResp(BaseModel):
+    session_id: str = ""
+    concept_map: Dict[str, Any] = {}
+    method_flow: Dict[str, Any] = {}
+    charts: List[Dict[str, Any]] = []
+
+class PaperTeachReq(BaseModel):
+    session_id: str
+
+class TeachChapter(BaseModel):
+    number: int = 0
+    title: str = ""
+    explanation: str = ""
+    analogy: str = ""
+    key_takeaway: str = ""
+
+class PaperTeachResp(BaseModel):
+    session_id: str = ""
+    lesson_title: str = ""
+    big_picture: str = ""
+    prerequisite_knowledge: str = ""
+    chapters: List[Dict[str, Any]] = []
+    how_it_all_fits: str = ""
+    paper_in_one_sentence: str = ""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,7 +199,7 @@ async def run_research(req: ResearchReq):
     """Synchronously run the full pipeline and return the result."""
     _log.info("Research request", extra={"q_len": len(req.query)})
     if req.paper_text:
-        get_kb().ingest(req.paper_text, filename=req.paper_filename)
+        get_kb().ingest(req.paper_text, filename=req.paper_filename)  # session_id discarded — research mode
 
     state = ResearchState(
         original_query=req.query,
@@ -187,7 +271,14 @@ async def get_result(request_id: str):
 
 @router.post("/upload-paper", response_model=UploadResp)
 async def upload_paper(file: UploadFile = File(...)):
-    _log.info("Upload", extra={"name": file.filename})
+    """
+    Extract text from PDF/TXT, embed into Qdrant, return a session_id.
+
+    The session_id scopes all subsequent /paper/summarize and /paper/ask
+    calls to this user's paper.  Call DELETE /paper/session/{session_id}
+    when done to free Qdrant storage.
+    """
+    _log.info("Upload", extra={"file": file.filename})
     content = await file.read()
     text = ""
     if file.filename and file.filename.lower().endswith(".pdf"):
@@ -200,9 +291,140 @@ async def upload_paper(file: UploadFile = File(...)):
         text = content.decode("utf-8", errors="ignore")
     if not text.strip():
         raise HTTPException(400, "No text extracted")
+
     kb = get_kb()
-    did = kb.ingest(text, filename=file.filename)
-    return UploadResp(doc_id=did, filename=file.filename, text_length=len(text), chunks=kb.chunk_count, text_preview=text[:500])
+    session_id, doc_id = kb.ingest(text, filename=file.filename)
+    return UploadResp(
+        session_id=session_id,
+        doc_id=doc_id,
+        filename=file.filename,
+        text_length=len(text),
+        chunks=kb.chunk_count,
+        text_preview=text[:500],
+    )
+
+
+@router.post("/paper/summarize", response_model=PaperSummarizeResp)
+async def summarize_paper(req: PaperSummarizeReq):
+    """
+    Summarise an uploaded paper.
+
+    Requires a ``session_id`` returned by ``POST /upload-paper``.
+    Fetches the full paper text from the session store and runs the
+    PaperSummarizerAgent to produce a structured LLM summary.
+    """
+    kb = get_kb()
+    text = kb.get_doc(req.session_id)
+    if not text:
+        raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+
+    meta = kb.get_session_meta(req.session_id)
+    doc_id  = meta["doc_id"]  if meta else ""
+    filename = req.filename or (meta["filename"] if meta else None)
+
+    try:
+        agent = PaperSummarizerAgent()
+        summary = await agent.summarize(text, filename=filename)
+        # Cache summary in session meta so teach endpoint can use it
+        if meta is not None:
+            meta["summary"] = summary
+        return PaperSummarizeResp(
+            session_id=req.session_id,
+            doc_id=doc_id,
+            filename=filename,
+            **summary,
+        )
+    except Exception as exc:
+        _log.error("Summarize error", extra={"err": str(exc)})
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/paper/ask", response_model=PaperAskResp)
+async def ask_paper(req: PaperAskReq):
+    """
+    Answer a detailed question about the uploaded paper.
+
+    Scoped to the caller's session: only retrieves chunks from their paper.
+    Also searches arXiv + Semantic Scholar for related external context.
+    """
+    kb = get_kb()
+    if not kb.get_session_meta(req.session_id):
+        raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+
+    try:
+        agent = PaperQAAgent()
+        result = await agent.answer(question=req.question, session_id=req.session_id)
+        return PaperAskResp(question=req.question, **result)
+    except Exception as exc:
+        _log.error("PaperAsk error", extra={"err": str(exc)})
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/paper/visualize", response_model=PaperVisualizeResp)
+async def visualize_paper(req: PaperVisualizeReq):
+    """
+    Extract concept map, method flow, and result charts from the uploaded paper.
+
+    Uses RAG to pull the most relevant chunks, then the LLM structures them
+    into three visualization-ready JSON objects for React Flow + Recharts.
+    """
+    kb = get_kb()
+    if not kb.get_session_meta(req.session_id):
+        raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+    try:
+        agent = PaperVisualizerAgent()
+        result = await agent.visualize(session_id=req.session_id)
+        return PaperVisualizeResp(session_id=req.session_id, **result)
+    except Exception as exc:
+        _log.error("Visualize error", extra={"err": str(exc)})
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/paper/teach", response_model=PaperTeachResp)
+async def teach_paper(req: PaperTeachReq):
+    """
+    Generate a teacher-style walkthrough lesson for the uploaded paper.
+
+    Reads the full paper text from the session store, optionally uses
+    cached summary metadata for richer context, and returns a structured
+    lesson plan with chapters, analogies, and key takeaways.
+    """
+    kb = get_kb()
+    text = kb.get_doc(req.session_id)
+    if not text:
+        raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+
+    meta = kb.get_session_meta(req.session_id)
+    summary = meta.get("summary") if meta else None
+
+    try:
+        agent = PaperTeacherAgent()
+        lesson = await agent.teach(text, filename=meta.get("filename") if meta else None, summary=summary)
+        return PaperTeachResp(session_id=req.session_id, **lesson)
+    except Exception as exc:
+        _log.error("Teach error", extra={"err": str(exc)})
+        raise HTTPException(500, str(exc))
+
+
+@router.delete("/paper/session/{session_id}", response_model=SessionDeleteResp)
+async def delete_session(session_id: str):
+    """
+    Free all Qdrant vectors for this session.
+
+    Call this when the user is done (browser close, "New paper" click, logout).
+    Safe to call multiple times — returns 0 chunks if already cleaned up.
+    """
+    kb = get_kb()
+    deleted = kb.delete_session(session_id)
+    _log.info("Session freed", extra={"session_id": session_id, "chunks": deleted})
+    return SessionDeleteResp(session_id=session_id, chunks_deleted=deleted)
+
+
+@router.delete("/paper/session/cleanup", response_model=Dict[str, Any])
+async def cleanup_sessions():
+    """Delete all sessions older than SESSION_MAX_AGE_HOURS (default 2 h)."""
+    cleaned = get_kb().cleanup_old_sessions()
+    return {"cleaned": cleaned}
 
 
 @router.get("/graph-topology", response_model=Topology)

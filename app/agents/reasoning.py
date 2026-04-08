@@ -83,7 +83,7 @@ class ReasoningAgent(BaseAgent):
 
         # 1. RAG retrieval from knowledge base
         kb = get_kb()
-        rag_chunks = kb.retrieve(query, top_k=5)
+        rag_chunks = kb.search(query, top_k=5)
         rag_text = (
             "\n---\n".join(rag_chunks) if rag_chunks else "(No knowledge base passages)"
         )

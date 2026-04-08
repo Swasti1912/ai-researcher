@@ -12,3 +12,19 @@ export const uploadPaper = (file) => {
 export const getResult = (id) => http.get(`/research/${id}`).then(r => r.data);
 export const getHealth = () => http.get('/health').then(r => r.data);
 export const getTopology = () => http.get('/graph-topology').then(r => r.data);
+
+// Paper mode — all calls are scoped to a session_id returned by uploadPaper
+export const summarizePaper = (sessionId, filename) =>
+  http.post('/paper/summarize', { session_id: sessionId, filename }, { timeout: 120_000 }).then(r => r.data);
+
+export const askPaper = (question, sessionId) =>
+  http.post('/paper/ask', { question, session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);
+
+export const deleteSession = (sessionId) =>
+  http.delete(`/paper/session/${sessionId}`).then(r => r.data);
+
+export const visualizePaper = (sessionId) =>
+  http.post('/paper/visualize', { session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);
+
+export const teachPaper = (sessionId) =>
+  http.post('/paper/teach', { session_id: sessionId }, { timeout: 180_000 }).then(r => r.data);

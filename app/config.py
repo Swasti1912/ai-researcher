@@ -20,11 +20,13 @@ class Settings(BaseSettings):
         case_sensitive=False, extra="ignore",
     )
 
-    # LLM
+    # LLM provider — "groq" or "openai"
+    llm_provider: str = "groq"
+    groq_api_key: str = ""
     openai_api_key: str = ""
-    llm_model: str = "gpt-4o"
-    llm_temperature: float = 0.1
-    llm_max_tokens: int = 4096
+    llm_model: str = "openai/gpt-oss-120b"
+    llm_temperature: float = 1.0
+    llm_max_tokens: int = 4000   # free tier limit ~8k TPM; keep output headroom for input tokens
 
     # External APIs
     semantic_scholar_api_key: str = ""
@@ -40,6 +42,14 @@ class Settings(BaseSettings):
     # Pipeline
     max_iterations: int = 3
     request_timeout: int = 180
+
+    # Qdrant vector store
+    # Set qdrant_url=":memory:" for local dev (no Docker needed).
+    # For production point to your Qdrant instance, e.g. "http://localhost:6333"
+    qdrant_url: str = ":memory:"
+    qdrant_collection: str = "paper_chunks"
+    embedding_model: str = "all-MiniLM-L6-v2"   # 384-dim, ~80 MB, runs locally
+    session_max_age_hours: float = 2.0           # auto-clean sessions older than this
 
     @property
     def cors_list(self) -> List[str]:
