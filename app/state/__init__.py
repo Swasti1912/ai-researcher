@@ -106,8 +106,19 @@ class ResearchState:
 
     def to_api_dict(self) -> Dict[str, Any]:
         """Convert to a plain dict safe for JSON API responses."""
+        # Ensure rag_references is always List[str]
+        safe_refs = []
+        for r in self.rag_references:
+            if isinstance(r, str):
+                safe_refs.append(r)
+            elif isinstance(r, dict):
+                safe_refs.append(r.get("title") or r.get("text") or str(r))
+            else:
+                safe_refs.append(str(r))
+
         return {
             "request_id": self.request_id,
+            "status": self.status,
             "original_query": self.original_query,
             "refined_query": self.refined_query,
             "intent": self.intent.model_dump() if self.intent else None,
@@ -115,12 +126,11 @@ class ResearchState:
             "api_results": [a.model_dump() for a in self.api_results],
             "aggregated_context": self.aggregated_context,
             "reasoning_output": self.reasoning_output,
-            "visualizations": self.visualizations,
-            "rag_references": self.rag_references,
+            "visualizations": self.visualizations if isinstance(self.visualizations, list) else [],
+            "rag_references": safe_refs,
             "evaluation": self.evaluation.model_dump() if self.evaluation else None,
             "final_answer": self.final_answer,
-            "status": self.status,
-            "iteration": self.iteration,
-            "error_message": self.error_message,
+            # Map internal name → API name (ResearchResp uses "error" not "error_message")
+            "error": self.error_message,
             "agent_trace": self.agent_trace,
         }

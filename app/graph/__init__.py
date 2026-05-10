@@ -34,12 +34,17 @@ def _should_continue(state: ResearchState) -> str:
 
     Returns ``"end"`` to terminate or ``"orchestrator"`` to loop.
     """
-    if state.status == WorkflowStatus.COMPLETED:
+    # Accept both the enum value and plain string comparison
+    if str(state.status) == WorkflowStatus.COMPLETED:
         return "end"
     if state.iteration >= state.max_iterations:
         return "end"
-    if state.evaluation and state.evaluation.needs_refinement:
-        _log.info("Loop back", extra={"rid": state.request_id, "iter": state.iteration, "score": state.evaluation.quality_score})
+    if state.evaluation is not None and state.evaluation.needs_refinement:
+        _log.info(
+            "Loop back",
+            extra={"rid": state.request_id, "iter": state.iteration,
+                   "score": state.evaluation.quality_score},
+        )
         return "orchestrator"
     return "end"
 

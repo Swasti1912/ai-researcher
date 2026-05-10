@@ -6,7 +6,10 @@ export const submitResearch = (query, paperText, paperFilename, maxIterations = 
 
 export const uploadPaper = (file) => {
   const fd = new FormData(); fd.append('file', file);
-  return http.post('/upload-paper', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60_000 }).then(r => r.data);
+  // 180-second timeout: the first-ever upload triggers a cold-start model
+  // load (~80 MB sentence-transformers) which can take up to 90 s.
+  // Subsequent uploads are fast because the model stays in memory.
+  return http.post('/upload-paper', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 180_000 }).then(r => r.data);
 };
 
 export const getResult = (id) => http.get(`/research/${id}`).then(r => r.data);
@@ -15,7 +18,7 @@ export const getTopology = () => http.get('/graph-topology').then(r => r.data);
 
 // Paper mode — all calls are scoped to a session_id returned by uploadPaper
 export const summarizePaper = (sessionId, filename) =>
-  http.post('/paper/summarize', { session_id: sessionId, filename }, { timeout: 120_000 }).then(r => r.data);
+  http.post('/paper/summarize', { session_id: sessionId, filename }, { timeout: 180_000 }).then(r => r.data);
 
 export const askPaper = (question, sessionId) =>
   http.post('/paper/ask', { question, session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);

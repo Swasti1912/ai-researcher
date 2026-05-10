@@ -5,6 +5,7 @@ AI Researcher – FastAPI Application.
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -22,9 +23,23 @@ from app.utils.logger import get_logger, setup_logging
 async def lifespan(_app: FastAPI) -> AsyncGenerator:
     s = get_settings()
     setup_logging(s.log_level)
-    get_logger("main").info("Starting", extra={"model": s.llm_model, "port": s.port})
+    log = get_logger("main")
+    log.info("Starting", extra={"model": s.llm_model, "port": s.port})
+
+    # Eagerly initialise the embedding model and Qdrant client so the very
+    # first paper upload doesn't time out waiting for a cold-start model load.
+    # Run in a thread pool — SentenceTransformer loading is CPU/IO-bound and
+    # must not block the async event loop.
+    try:
+        from app.knowledge_base import get_kb
+        kb = get_kb()
+        await asyncio.to_thread(kb._warmup)
+        log.info("Knowledge base warmed up")
+    except Exception as exc:
+        log.warning("KB warmup failed (non-fatal)", extra={"err": str(exc)})
+
     yield
-    get_logger("main").info("Shutdown")
+    log.info("Shutdown")
 
 
 app = FastAPI(

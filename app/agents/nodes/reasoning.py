@@ -77,7 +77,18 @@ class _Reasoning(BaseAgent):
         if parsed and isinstance(parsed, dict):
             answer = parsed.get("answer", raw)
             vizs = parsed.get("visualizations", [])
-            refs = parsed.get("references", [])
+            raw_refs = parsed.get("references", [])
+            # Ensure refs is always List[str] — LLMs sometimes return dicts
+            if isinstance(raw_refs, list):
+                refs = [
+                    r if isinstance(r, str) else (r.get("title") or r.get("text") or str(r))
+                    for r in raw_refs
+                ]
+            elif isinstance(raw_refs, dict):
+                refs = list(raw_refs.values())
+            # Ensure vizs is always a list
+            if not isinstance(vizs, list):
+                vizs = []
 
         _log.info("Reasoning", extra={"ans_len": len(answer), "vizs": len(vizs), "refs": len(refs), "rag": len(rag)})
         return {"reasoning_output": answer, "visualizations": vizs, "rag_references": refs, "current_agent": self.name}

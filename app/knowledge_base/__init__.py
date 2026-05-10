@@ -197,7 +197,11 @@ class KnowledgeBase:
         Returns:
             List of text chunks ranked by cosine similarity.
         """
-        if not _sessions and session_id:
+        # If no papers have been ingested at all, there is nothing to search.
+        if not _sessions:
+            return []
+        # If a specific session is requested but doesn't exist, return empty.
+        if session_id and session_id not in _sessions:
             return []
 
         model  = _get_model()
@@ -280,6 +284,20 @@ class KnowledgeBase:
     def get_session_meta(self, session_id: str) -> Optional[Dict]:
         """Return session metadata dict or None if session doesn't exist."""
         return _sessions.get(session_id)
+
+    # ── Warmup ────────────────────────────────────────────────────────
+
+    def _warmup(self) -> None:
+        """
+        Eagerly load the embedding model and initialise the Qdrant client.
+
+        Called once at server startup so the first paper upload is never
+        delayed by cold-start model loading (which can take 30-90 s and
+        cause the frontend's 60-second timeout to fire).
+        """
+        _get_model()   # loads sentence-transformers model into memory
+        _get_client()  # connects to Qdrant and ensures collection exists
+        _log.info("Embedding model and Qdrant client ready")
 
     # ── Observability ──────────────────────────────────────────────────
 

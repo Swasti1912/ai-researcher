@@ -20,13 +20,12 @@ class Settings(BaseSettings):
         case_sensitive=False, extra="ignore",
     )
 
-    # LLM provider — "groq" or "openai"
+    # LLM provider — Groq only
     llm_provider: str = "groq"
     groq_api_key: str = ""
-    openai_api_key: str = ""
-    llm_model: str = "openai/gpt-oss-120b"
-    llm_temperature: float = 1.0
-    llm_max_tokens: int = 4000   # free tier limit ~8k TPM; keep output headroom for input tokens
+    llm_model: str = "llama-3.3-70b-versatile"   # Groq-hosted model
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 4000
 
     # External APIs
     semantic_scholar_api_key: str = ""

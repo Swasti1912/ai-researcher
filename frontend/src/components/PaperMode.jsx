@@ -6,10 +6,10 @@ import PaperTeacher from './PaperTeacher';
 
 // Processing steps shown while a paper is being ingested
 const PROC_STEPS = [
-  { key: 'parse',   label: 'Extracting text from document',   sub: '' },
-  { key: 'embed',   label: 'Chunking & building semantic index', sub: '' },
-  { key: 'summary', label: 'AI summarization',                 sub: 'Reading paper deeply with GPT-4o' },
-  { key: 'ready',   label: 'Ready for Q&A',                    sub: '' },
+  { key: 'parse',   label: 'Extracting text from document',      sub: '' },
+  { key: 'embed',   label: 'Chunking & building semantic index',  sub: '' },
+  { key: 'summary', label: 'AI summarization',                    sub: 'Reading paper deeply with Llama 3.3 70B' },
+  { key: 'ready',   label: 'Ready for Q&A',                       sub: '' },
 ];
 
 const DEPTH_COLORS = { beginner: 'bdg-g', intermediate: 'bdg-o', expert: 'bdg-r' };
@@ -26,6 +26,8 @@ export default function PaperMode() {
   const [question, setQuestion]   = useState('');
   const [asking, setAsking]       = useState(false);
   const [uploadErr, setUploadErr] = useState('');
+  const [summarizeErr, setSummarizeErr] = useState('');
+  const [pendingSummarize, setPendingSummarize] = useState(null); // { sessionId, filename }
   const [askErr, setAskErr]       = useState('');
   const [vizData, setVizData]     = useState(null);
   const [vizLoading, setVizLoading] = useState(false);
@@ -41,30 +43,56 @@ export default function PaperMode() {
   const handleFile = async (file) => {
     if (!file) return;
     setUploadErr('');
+    setSummarizeErr('');
+    setPendingSummarize(null);
     setFilename(file.name);
     setSummary(null);
     setMessages([]);
     setDoneSteps([]);
     setPhase('processing');
 
+    let uploadedId = null;
     try {
       setProcStep('parse');
       const uploaded = await uploadPaper(file);
+      uploadedId = uploaded.session_id;
+
+      // Store session ID immediately so it's available even if summarize fails
+      setSessionId(uploaded.session_id);
       setProcMeta({ chunks: uploaded.chunks, chars: uploaded.text_length });
       setDoneSteps(['parse', 'embed']);
 
-      setProcStep('summary');
-      const sum = await summarizePaper(uploaded.session_id, file.name);
-      setSessionId(uploaded.session_id);
-      setSummary(sum);
+      await runSummarize(uploaded.session_id, file.name);
+    } catch (e) {
+      // Upload itself failed — clean up any partially-created session
+      if (uploadedId) {
+        deleteSession(uploadedId).catch(() => {});
+        setSessionId(null);
+      }
+      setUploadErr(e.response?.data?.detail || e.message || 'Upload failed. Please try again.');
+      setPhase('upload');
+      setProcStep(null);
+      setDoneSteps([]);
+    }
+  };
 
+  // ── Run summarization (separate so it can be retried independently) ──
+  const runSummarize = async (sid, fname) => {
+    setSummarizeErr('');
+    setPendingSummarize(null);
+    setProcStep('summary');
+    try {
+      const sum = await summarizePaper(sid, fname);
+      setSummary(sum);
       setDoneSteps(['parse', 'embed', 'summary', 'ready']);
       setProcStep(null);
       setTimeout(() => setPhase('ready'), 600);
     } catch (e) {
-      setUploadErr(e.response?.data?.detail || e.message || 'Processing failed');
-      setPhase('upload');
+      const msg = e.response?.data?.detail || e.message || 'Summarization failed.';
+      setSummarizeErr(msg);
+      setPendingSummarize({ sessionId: sid, filename: fname });
       setProcStep(null);
+      setPhase('upload');
       setDoneSteps([]);
     }
   };
@@ -85,6 +113,8 @@ export default function PaperMode() {
     setProcStep(null);
     setProcMeta({});
     setUploadErr('');
+    setSummarizeErr('');
+    setPendingSummarize(null);
     setVizData(null);
     setVizErr('');
     setSectionsOpen(false);
@@ -178,6 +208,35 @@ export default function PaperMode() {
           <div className="paper-drop-title">Drop a paper here</div>
           <div className="paper-drop-sub">PDF, TXT, or Markdown · Click or drag</div>
           {uploadErr && <div className="paper-err">{uploadErr}</div>}
+        </div>
+      )}
+
+      {/* ── Summarize-retry panel (shown when upload succeeded but summarize failed) ── */}
+      {phase === 'upload' && pendingSummarize && (
+        <div className="paper-drop" style={{ marginTop: 12, cursor: 'default' }}
+          onClick={e => e.stopPropagation()}>
+          <div className="paper-drop-icon">⚠️</div>
+          <div className="paper-drop-title">Summarization failed</div>
+          <div className="paper-drop-sub">
+            Your paper was uploaded successfully but the AI summary timed out.
+            Your paper is still in memory — click below to retry without re-uploading.
+          </div>
+          {summarizeErr && <div className="paper-err">{summarizeErr}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button
+              className="btn btn-p"
+              onClick={() => {
+                setPhase('processing');
+                setDoneSteps(['parse', 'embed']);
+                runSummarize(pendingSummarize.sessionId, pendingSummarize.filename);
+              }}
+            >
+              ↻ Retry summarization
+            </button>
+            <button className="btn btn-g" onClick={resetToUpload}>
+              ✕ Start over
+            </button>
+          </div>
         </div>
       )}
 

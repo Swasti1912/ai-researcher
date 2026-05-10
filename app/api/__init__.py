@@ -11,6 +11,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import traceback
@@ -165,24 +166,49 @@ class PaperTeachResp(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _normalise(raw: Any, query: str) -> Dict[str, Any]:
-    """Turn the LangGraph result (dict or dataclass) into a flat dict."""
+    """Turn the LangGraph result (dict or dataclass) into a flat dict.
+
+    LangGraph 1.x returns a plain dict from ainvoke(); older versions may
+    return the state object directly.  Both cases are handled here.
+    """
     if hasattr(raw, "to_api_dict"):
+        # State dataclass returned directly (older LangGraph or custom schema)
         d = raw.to_api_dict()
+        # Map internal field name to API field name
+        if "error_message" in d:
+            d["error"] = d.pop("error_message")
+        # Remove internal-only fields that ResearchResp doesn't accept
+        for _internal in ("iteration", "current_agent", "uploaded_paper_text",
+                          "uploaded_paper_filename", "max_iterations"):
+            d.pop(_internal, None)
     elif isinstance(raw, dict):
+        # LangGraph 1.x returns a plain dict with all channel values.
+        # Values can be Pydantic model instances, plain dicts, lists, or scalars.
         d = {}
         for k in ResearchResp.model_fields:
-            v = raw.get(k)
+            # Also check the internal alias for 'error'
+            v = raw.get(k) if k != "error" else raw.get("error") or raw.get("error_message")
             if v is None:
+                # Keep the field absent so ResearchResp uses its default.
                 continue
             if hasattr(v, "model_dump"):
                 d[k] = v.model_dump()
             elif isinstance(v, list):
-                d[k] = [x.model_dump() if hasattr(x, "model_dump") else x for x in v]
+                serialised = []
+                for x in v:
+                    if hasattr(x, "model_dump"):
+                        serialised.append(x.model_dump())
+                    elif isinstance(x, dict):
+                        serialised.append(x)
+                    else:
+                        serialised.append(str(x))
+                d[k] = serialised
             else:
                 d[k] = v
     else:
         d = {}
     d.setdefault("original_query", query)
+    d.setdefault("status", "completed")
     return d
 
 
@@ -199,7 +225,10 @@ async def run_research(req: ResearchReq):
     """Synchronously run the full pipeline and return the result."""
     _log.info("Research request", extra={"q_len": len(req.query)})
     if req.paper_text:
-        get_kb().ingest(req.paper_text, filename=req.paper_filename)  # session_id discarded — research mode
+        try:
+            get_kb().ingest(req.paper_text, filename=req.paper_filename)  # session_id discarded — research mode
+        except Exception as exc:
+            _log.warning("KB ingest failed", extra={"err": str(exc)})
 
     state = ResearchState(
         original_query=req.query,
@@ -211,7 +240,8 @@ async def run_research(req: ResearchReq):
         result = await get_graph().ainvoke(state)
         d = _normalise(result, req.query)
         resp = ResearchResp(**d)
-        _store[resp.request_id] = resp.model_dump()
+        if resp.request_id:
+            _store[resp.request_id] = resp.model_dump()
         return resp
     except AIResearcherError as exc:
         raise HTTPException(exc.status_code, exc.message)
@@ -228,7 +258,10 @@ async def run_research_stream(req: ResearchReq):
     """
     _log.info("Stream request", extra={"q_len": len(req.query)})
     if req.paper_text:
-        get_kb().ingest(req.paper_text, filename=req.paper_filename)
+        try:
+            get_kb().ingest(req.paper_text, filename=req.paper_filename)
+        except Exception as exc:
+            _log.warning("KB ingest failed (stream)", extra={"err": str(exc)})
 
     state = ResearchState(
         original_query=req.query,
@@ -241,14 +274,19 @@ async def run_research_stream(req: ResearchReq):
         try:
             graph = get_graph()
             prev_len = 0
-            async for chunk in graph.astream(state):
+            # Use "updates" mode explicitly — in LangGraph 1.x the default
+            # compiled stream_mode may differ; "updates" gives {node: updates}.
+            async for chunk in graph.astream(state, stream_mode="updates"):
                 # chunk is a dict keyed by the node name
                 for node_name, node_output in chunk.items():
+                    if not isinstance(node_output, dict):
+                        continue  # skip internal LangGraph book-keeping tasks
                     trace = node_output.get("agent_trace", [])
-                    new_entries = trace[prev_len:]
-                    prev_len = len(trace)
-                    for entry in new_entries:
-                        yield f"data: {json.dumps({'type':'agent_done','payload': entry})}\n\n"
+                    if isinstance(trace, list):
+                        new_entries = trace[prev_len:]
+                        prev_len = len(trace)
+                        for entry in new_entries:
+                            yield f"data: {json.dumps({'type':'agent_done','payload': entry})}\n\n"
                     # Send partial state snapshot
                     partial = _normalise(node_output, req.query)
                     yield f"data: {json.dumps({'type':'state_update','payload': partial})}\n\n"
@@ -256,6 +294,7 @@ async def run_research_stream(req: ResearchReq):
             # Final complete event
             yield f"data: {json.dumps({'type':'complete'})}\n\n"
         except Exception as exc:
+            _log.error("Stream error", extra={"err": str(exc), "tb": traceback.format_exc()})
             yield f"data: {json.dumps({'type':'error','payload': str(exc)})}\n\n"
 
     return StreamingResponse(_events(), media_type="text/event-stream")
@@ -280,26 +319,35 @@ async def upload_paper(file: UploadFile = File(...)):
     """
     _log.info("Upload", extra={"file": file.filename})
     content = await file.read()
-    text = ""
-    if file.filename and file.filename.lower().endswith(".pdf"):
-        try:
-            import PyPDF2
-            text = "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(content)).pages)
-        except Exception:
-            text = content.decode("utf-8", errors="ignore")
-    else:
-        text = content.decode("utf-8", errors="ignore")
+    filename = file.filename or ""
+
+    # ── Text extraction (CPU-bound / blocking — run off the event loop) ─
+    def _extract_text() -> str:
+        if filename.lower().endswith(".pdf"):
+            try:
+                import PyPDF2
+                return "\n".join(
+                    p.extract_text() or ""
+                    for p in PyPDF2.PdfReader(io.BytesIO(content)).pages
+                )
+            except Exception:
+                return content.decode("utf-8", errors="ignore")
+        return content.decode("utf-8", errors="ignore")
+
+    text = await asyncio.to_thread(_extract_text)
     if not text.strip():
         raise HTTPException(400, "No text extracted")
 
+    # ── Embedding + Qdrant ingest (CPU-bound / blocking — run off the event loop) ─
     kb = get_kb()
-    session_id, doc_id = kb.ingest(text, filename=file.filename)
+    session_id, doc_id = await asyncio.to_thread(kb.ingest, text, filename=filename)
+
     return UploadResp(
         session_id=session_id,
         doc_id=doc_id,
-        filename=file.filename,
+        filename=filename,
         text_length=len(text),
-        chunks=kb.chunk_count,
+        chunks=kb.get_session_meta(session_id).get("chunk_count", 0) if kb.get_session_meta(session_id) else 0,
         text_preview=text[:500],
     )
 

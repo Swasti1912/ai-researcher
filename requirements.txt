@@ -12,3 +12,6 @@ httpx>=0.27.0
 PyPDF2>=3.0.0
 aiofiles>=24.1.0
 sse-starlette>=2.0.0
+sentence-transformers
+qdrant_client
+langchain_groq
