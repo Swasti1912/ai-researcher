@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import Viz from './Viz';
 import PaperDeepDive from './PaperDeepDive';
+import { explainSubQuestion } from '../services/api';
 
 const TABS = [
   { k: 'answer', l: 'Answer' }, { k: 'intent', l: 'Intent' },
@@ -29,15 +30,15 @@ function extractPapers(api_results) {
       seen.add(key);
       const url      = p.url   || '';
       const abstract = p.summary || p.abstract || '';
-      // Only include papers we can actually deep-dive — need a URL or abstract
-      if (!url && !abstract) continue;
+      const canDive  = !!(url || abstract);  // arXiv/S2 have these; CrossRef usually doesn't
       out.push({
-        title: p.title || 'Untitled',
+        title:   p.title || 'Untitled',
         url,
         abstract,
-        year:   p.year  || '',
-        doi:    p.doi   || '',
+        year:    p.year  || '',
+        doi:     p.doi   || '',
         source,
+        canDive,
       });
     }
   }
@@ -45,13 +46,31 @@ function extractPapers(api_results) {
 }
 
 export default function Results({ result: r }) {
-  const [tab, setTab]       = useState('answer');
-  const [divePaper, setDivePaper] = useState(null); // { title, url, abstract, source }
+  const [tab, setTab]             = useState('answer');
+  const [divePaper, setDivePaper] = useState(null);
+  const [activeSubQ, setActiveSubQ] = useState(null);   // clicked sub-question string
+  const [subQLoading, setSubQLoading] = useState(false);
+  const [subQData, setSubQData]   = useState(null);     // { answer, papers }
   if (!r) return null;
 
   const papers = useMemo(() => extractPapers(r.api_results), [r.api_results]);
   const qualityPct = r.evaluation ? (r.evaluation.quality_score * 100).toFixed(0) : null;
   const confClass = qualityPct >= 70 ? 'bdg-g' : qualityPct >= 40 ? 'bdg-o' : 'bdg-r';
+
+  const handleSubQClick = async (question) => {
+    if (activeSubQ === question) { setActiveSubQ(null); setSubQData(null); return; }
+    setActiveSubQ(question);
+    setSubQData(null);
+    setSubQLoading(true);
+    try {
+      const data = await explainSubQuestion(question, r.aggregated_context || '', r.api_results || []);
+      setSubQData(data);
+    } catch (e) {
+      setSubQData({ answer: '⚠️ Failed to load explanation.', papers: [] });
+    } finally {
+      setSubQLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -102,21 +121,76 @@ export default function Results({ result: r }) {
                   </div>
                 )}
 
-                {/* Sub-questions as "Dive deeper" chips */}
+                {/* Sub-questions — clickable to expand focused answer */}
                 {r.sub_questions?.length > 0 && (
                   <div className="follow-up-section">
-                    <div className="follow-up-label">Sub-questions explored</div>
+                    <div className="follow-up-label">Sub-questions explored — click to dive deeper</div>
                     <div className="follow-up-chips">
                       {r.sub_questions.map((sq, i) => (
-                        <span key={i} className="follow-up-chip" style={{ cursor: 'default' }}>
+                        <button
+                          key={i}
+                          className={`follow-up-chip${activeSubQ === sq.question ? ' follow-up-chip-active' : ''}`}
+                          onClick={() => handleSubQClick(sq.question)}
+                        >
                           {sq.question}
-                        </span>
+                          <span style={{ marginLeft: 6, fontSize: '.65rem', opacity: 0.6 }}>
+                            {activeSubQ === sq.question ? '▴' : '▾'}
+                          </span>
+                        </button>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* ── Sub-question detail panel ── */}
+            {activeSubQ && (
+              <div className="subq-panel">
+                <div className="subq-panel-header">
+                  <span className="subq-panel-icon">🔍</span>
+                  <div className="subq-panel-question">{activeSubQ}</div>
+                </div>
+                {subQLoading && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 0', color: 'var(--t3)', fontSize: '.78rem' }}>
+                    <div className="spin" style={{ width: 16, height: 16 }} /> Researching this sub-question…
+                  </div>
+                )}
+                {subQData && (
+                  <>
+                    <div className="subq-answer">{subQData.answer}</div>
+                    {subQData.papers?.length > 0 && (
+                      <div style={{ marginTop: 14 }}>
+                        <div className="ref-papers-heading" style={{ marginBottom: 8 }}>
+                          <span className="ref-papers-icon">📄</span> Sources
+                          <span className="bdg bdg-o" style={{ marginLeft: 6 }}>{subQData.papers.length}</span>
+                        </div>
+                        <div className="ref-papers-grid">
+                          {subQData.papers.map((p, i) => {
+                            const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
+                            return (
+                              <button key={i} className="ref-paper-card"
+                                onClick={() => p.canDive !== false && setDivePaper(p)}
+                                style={{ cursor: p.canDive === false && !p.url ? 'default' : 'pointer' }}>
+                                <div className="ref-paper-top">
+                                  <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
+                                  {p.year && <span className="ref-paper-year">{p.year}</span>}
+                                </div>
+                                <div className="ref-paper-title">{p.title}</div>
+                                {p.abstract && <div className="ref-paper-abstract">{p.abstract.slice(0,120)}{p.abstract.length>120?'…':''}</div>}
+                                <div className="ref-paper-cta">
+                                  {p.url || p.abstract ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : 'No full text available'}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {/* ── Referenced papers — click to deep-dive ── */}
             {papers.length > 0 && (
@@ -133,7 +207,7 @@ export default function Results({ result: r }) {
                       <button
                         key={i}
                         className="ref-paper-card"
-                        onClick={() => setDivePaper(p)}
+                        onClick={() => p.canDive ? setDivePaper(p) : p.url && window.open(p.url, '_blank')}
                       >
                         <div className="ref-paper-top">
                           <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
@@ -146,7 +220,7 @@ export default function Results({ result: r }) {
                           </div>
                         )}
                         <div className="ref-paper-cta">
-                          Summarize &amp; Visualize →
+                          {p.canDive ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : 'Search on Scholar →'}
                         </div>
                       </button>
                     );

@@ -76,6 +76,16 @@ class HealthResp(BaseModel):
     kb_docs: int = 0
     kb_chunks: int = 0
 
+class SubQuestionReq(BaseModel):
+    question: str
+    context: str = ""          # aggregated_context from the research run
+    api_results: List[Dict[str, Any]] = []   # raw api_results for source cards
+
+class SubQuestionResp(BaseModel):
+    question: str = ""
+    answer: str = ""
+    papers: List[Dict[str, Any]] = []   # accessible source papers
+
 class TopoNode(BaseModel):
     id: str; label: str; description: str; color: str = "orange"
 class TopoEdge(BaseModel):
@@ -219,6 +229,71 @@ def _normalise(raw: Any, query: str) -> Dict[str, Any]:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@router.post("/research/subquestion", response_model=SubQuestionResp)
+async def explain_subquestion(req: SubQuestionReq):
+    """
+    Answer one sub-question in depth, citing from the aggregated research
+    context and any accessible external papers already in api_results.
+    """
+    from app.agents.base import BaseAgent
+    from app.utils.helpers import truncate as _trunc
+
+    # Flatten accessible papers from api_results
+    papers = []
+    seen = set()
+    for res in req.api_results:
+        items = (res.get("data") or {}).get("papers", []) or (res.get("data") or {}).get("works", [])
+        for p in items:
+            url      = p.get("url", "")
+            abstract = p.get("abstract") or p.get("summary") or ""
+            title    = p.get("title", "")
+            key = (url or title).lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            papers.append({
+                "title":    title,
+                "url":      url,
+                "abstract": abstract,
+                "year":     p.get("year", ""),
+                "source":   res.get("source", ""),
+            })
+
+    # Build a focused context for this sub-question
+    paper_blurbs = "\n".join(
+        f'[{p["source"]}] {p["title"]} ({p["year"]}): {_trunc(p["abstract"], 200)}'
+        for p in papers[:6]
+    ) or "(no external papers available)"
+
+    context_snippet = _trunc(req.context, 3000) if req.context else "(no aggregated context)"
+
+    class _QuickAgent(BaseAgent):
+        name = "subq_explainer"
+        @property
+        def system_prompt(self):
+            return (
+                "You are an expert research assistant. Given a focused research sub-question, "
+                "answer it in depth (300-500 words) using the provided context and external papers. "
+                "Structure with ## headers. Cite sources by paper title. "
+                "Explain concepts clearly — include how/why, not just what. "
+                "Plain text only, no JSON."
+            )
+
+    agent = _QuickAgent()
+    prompt = (
+        f"Sub-question: {req.question}\n\n"
+        f"--- Aggregated research context ---\n{context_snippet}\n\n"
+        f"--- External papers ---\n{paper_blurbs}\n\n"
+        "Provide a focused, well-cited answer to this sub-question."
+    )
+    try:
+        answer = await agent.call_llm(prompt)
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+    return SubQuestionResp(question=req.question, answer=answer, papers=papers[:6])
+
 
 @router.get("/health", response_model=HealthResp)
 async def health():

@@ -388,3 +388,13 @@ details[open] summary::before{content:'▾'}
 
 /* ── Architecture diagram title ─────────────────────────────────── */
 .arch-title{font-size:.72rem;font-weight:700;font-family:var(--m);color:var(--blue);text-transform:uppercase;letter-spacing:.1em;padding:6px 12px 0;text-align:center}
+
+/* ── Active follow-up chip ───────────────────────────────────────── */
+.follow-up-chip-active{border-color:var(--orange)!important;background:var(--orange-d)!important;color:var(--orange-l)!important}
+
+/* ── Sub-question detail panel ───────────────────────────────────── */
+.subq-panel{background:var(--bg0);border:1px solid var(--orange);border-radius:var(--r);padding:16px 18px;margin-top:14px;display:flex;flex-direction:column;gap:10px}
+.subq-panel-header{display:flex;align-items:flex-start;gap:10px}
+.subq-panel-icon{font-size:1rem;flex-shrink:0;margin-top:2px}
+.subq-panel-question{font-size:.84rem;font-weight:700;color:var(--orange-l);line-height:1.4}
+.subq-answer{font-size:.81rem;color:var(--t1);line-height:1.8;white-space:pre-wrap}

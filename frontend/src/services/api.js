@@ -34,3 +34,6 @@ export const teachPaper = (sessionId) =>
 
 export const fetchPaperFromUrl = (url, abstract, title) =>
   http.post('/paper/from-url', { url, abstract, title }, { timeout: 60_000 }).then(r => r.data);
+
+export const explainSubQuestion = (question, context, api_results) =>
+  http.post('/research/subquestion', { question, context, api_results }, { timeout: 90_000 }).then(r => r.data);
