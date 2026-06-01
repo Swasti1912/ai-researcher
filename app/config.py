@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # External APIs
     semantic_scholar_api_key: str = ""
-    arxiv_base_url: str = "http://export.arxiv.org/api/query"
+    arxiv_base_url: str = "https://export.arxiv.org/api/query"
     crossref_base_url: str = "https://api.crossref.org"
 
     # Server

@@ -172,13 +172,39 @@ export default function PaperDeepDive({ paper, onClose }) {
           </div>
         )}
 
-        {/* ── Error phase ── */}
+        {/* ── Error phase — paper not accessible, show metadata + open link ── */}
         {phase === 'error' && (
-          <div className="ddive-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ textAlign: 'center', color: 'var(--red)' }}>
-              <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚠️</div>
-              <div style={{ fontWeight: 600 }}>Failed to load paper</div>
-              <div style={{ fontSize: '.78rem', color: 'var(--t2)', marginTop: 4 }}>{errMsg}</div>
+          <div className="ddive-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+            <div style={{ maxWidth: 480, width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <span style={{ fontSize: '1.5rem' }}>📄</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--t0)', fontSize: '.88rem' }}>{paper.title}</div>
+                  {paper.year && <div style={{ fontSize: '.72rem', color: 'var(--t3)', marginTop: 2 }}>{paper.year}</div>}
+                </div>
+              </div>
+              <div style={{ background: 'var(--bg0)', border: '1px solid var(--bdr)', borderRadius: 'var(--r)', padding: '12px 16px', marginBottom: 14 }}>
+                <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--yellow)', fontFamily: 'var(--m)', marginBottom: 6 }}>
+                  ⚠️ Full text not accessible
+                </div>
+                <div style={{ fontSize: '.78rem', color: 'var(--t2)', lineHeight: 1.6 }}>
+                  This paper ({src.label}) doesn't have a publicly accessible PDF or abstract.
+                  {paper.url && ' You can open the source page below to read it directly.'}
+                </div>
+              </div>
+              {paper.url && (
+                <a href={paper.url} target="_blank" rel="noopener noreferrer"
+                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--orange)', color: '#fff',
+                            borderRadius: 'var(--rs)', padding: '8px 16px', fontSize: '.78rem', fontWeight: 600,
+                            textDecoration: 'none', transition: 'opacity .15s' }}>
+                  ↗ Open paper on {src.label}
+                </a>
+              )}
+              {!paper.url && (
+                <div style={{ fontSize: '.72rem', color: 'var(--t3)' }}>
+                  Search for "{paper.title}" on Google Scholar or Semantic Scholar to find this paper.
+                </div>
+              )}
             </div>
           </div>
         )}

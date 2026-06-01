@@ -505,42 +505,54 @@ async def paper_from_url(req: FetchPaperReq):
         text = req.abstract
         filename = filename.replace(".pdf", ".txt")
 
-    # ── Fallback 2: search arXiv by title to find a PDF ──────────────────────
+    # ── Fallback 2: search arXiv by title (try full title, then first 5 words) ─
     if not text.strip() and req.title:
-        try:
-            import urllib.parse
-            search_q = urllib.parse.quote_plus(f"ti:{req.title}")
-            arxiv_search = f"https://export.arxiv.org/api/query?search_query={search_q}&max_results=1"
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                sr = await client.get(arxiv_search, headers={"User-Agent": "AI-Researcher/1.0"})
-            if sr.status_code == 200:
-                import xml.etree.ElementTree as ET
+        import urllib.parse, xml.etree.ElementTree as ET
+
+        async def _arxiv_search_and_fetch(query_title: str) -> str:
+            """Search arXiv for query_title, return extracted PDF text or ''."""
+            try:
+                search_q = urllib.parse.quote_plus(f"ti:{query_title}")
+                arxiv_url = f"https://export.arxiv.org/api/query?search_query={search_q}&max_results=1&sortBy=relevance"
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as c:
+                    sr = await c.get(arxiv_url, headers={"User-Agent": "AI-Researcher/1.0"})
+                if sr.status_code != 200:
+                    return ""
                 ns = {"a": "http://www.w3.org/2005/Atom"}
                 root = ET.fromstring(sr.text)
-                for entry in root.findall("a:entry", ns):
+                entries = root.findall("a:entry", ns)
+                if not entries:
+                    return ""
+                for entry in entries:
                     for lnk in entry.findall("a:link", ns):
                         if lnk.get("title") == "pdf":
                             pdf_url = lnk.get("href", "").replace("http://", "https://")
-                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client2:
-                                pr = await client2.get(pdf_url, headers={"User-Agent": "AI-Researcher/1.0"})
+                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c2:
+                                pr = await c2.get(pdf_url, headers={"User-Agent": "AI-Researcher/1.0"})
                             if pr.status_code == 200 and pr.content:
-                                def _parse2(c: bytes) -> str:
+                                def _parse_pdf(b: bytes) -> str:
                                     import PyPDF2, io
                                     try:
-                                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(c)).pages)
+                                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(b)).pages)
                                     except Exception:
                                         return ""
-                                text = await asyncio.to_thread(_parse2, pr.content)
-                                if text.strip():
-                                    _log.info("arXiv title fallback succeeded", extra={"title": req.title})
-                                    break
-                    if text.strip():
-                        break
-        except Exception as exc:
-            _log.warning("arXiv title search failed", extra={"err": str(exc)})
+                                return await asyncio.to_thread(_parse_pdf, pr.content)
+            except Exception as exc:
+                _log.warning("arXiv title search failed", extra={"err": str(exc)})
+            return ""
+
+        # Try full title first, then first 5 words as a broader fallback
+        text = await _arxiv_search_and_fetch(req.title)
+        if text.strip():
+            _log.info("arXiv full-title fallback succeeded", extra={"title": req.title})
+        else:
+            short_title = " ".join(req.title.split()[:5])
+            text = await _arxiv_search_and_fetch(short_title)
+            if text.strip():
+                _log.info("arXiv short-title fallback succeeded", extra={"short": short_title})
 
     if not text.strip():
-        raise HTTPException(404, "Paper text not available — no PDF URL, abstract, or matching arXiv entry found")
+        raise HTTPException(404, "Paper not accessible — PDF URL unavailable, no abstract provided, and no matching arXiv entry found")
 
     kb = get_kb()
     session_id, doc_id = await asyncio.to_thread(kb.ingest, text, filename=filename)
