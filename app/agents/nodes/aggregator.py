@@ -54,8 +54,22 @@ class _Aggregator(BaseAgent):
         if not sqs:
             return {"api_results": [], "aggregated_context": "", "current_agent": self.name}
 
-        tasks = [self._fetch(sq) for sq in sqs]
-        results: List[APIResult] = await asyncio.gather(*tasks)
+        # Fire API calls with a small stagger for rate-limited APIs (arXiv/S2)
+        # to avoid concurrent 429s. Group by source; arXiv gets 1 s delay between calls.
+        arxiv_sqs  = [sq for sq in sqs if sq.api_source.lower() == "arxiv"]
+        other_sqs  = [sq for sq in sqs if sq.api_source.lower() != "arxiv"]
+
+        results: List[APIResult] = []
+
+        # Other APIs (S2, CrossRef, web) run concurrently
+        other_results = await asyncio.gather(*[self._fetch(sq) for sq in other_sqs])
+        results.extend(other_results)
+
+        # arXiv runs sequentially with 1 s gap to avoid rate-limiting
+        for i, sq in enumerate(arxiv_sqs):
+            if i > 0:
+                await asyncio.sleep(1.0)
+            results.append(await self._fetch(sq))
 
         ok = [r for r in results if not r.error]
         raw = json.dumps([r.model_dump() for r in ok], indent=2, default=str)

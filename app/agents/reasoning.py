@@ -134,6 +134,14 @@ class ReasoningAgent(BaseAgent):
                     pre_json = raw.split("{")[0].strip()
                     answer = pre_json if len(pre_json) > 50 else raw
 
+        # Strip trailing JSON fence / bracket artifacts that some models leak
+        if isinstance(answer, str):
+            import re
+            # Remove trailing ``` fences, lone ] or } lines, and blank lines
+            answer = re.sub(r'\s*```\s*$', '', answer.rstrip())
+            answer = re.sub(r'\s*[\]\}]\s*$', '', answer.rstrip())
+            answer = answer.strip()
+
         logger.info(
             "Reasoning complete",
             extra={
