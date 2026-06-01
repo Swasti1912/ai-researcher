@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import Viz from './Viz';
 import PaperDeepDive from './PaperDeepDive';
 import { explainSubQuestion } from '../services/api';
@@ -48,9 +48,10 @@ function extractPapers(api_results) {
 export default function Results({ result: r }) {
   const [tab, setTab]             = useState('answer');
   const [divePaper, setDivePaper] = useState(null);
-  const [activeSubQ, setActiveSubQ] = useState(null);   // clicked sub-question string
+  const [activeSubQ, setActiveSubQ] = useState(null);
   const [subQLoading, setSubQLoading] = useState(false);
-  const [subQData, setSubQData]   = useState(null);     // { answer, papers }
+  const [subQData, setSubQData]   = useState(null);
+  const subQRef = useRef(null);
   if (!r) return null;
 
   const papers = useMemo(() => extractPapers(r.api_results), [r.api_results]);
@@ -62,6 +63,8 @@ export default function Results({ result: r }) {
     setActiveSubQ(question);
     setSubQData(null);
     setSubQLoading(true);
+    // Scroll to panel after React renders it
+    setTimeout(() => subQRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
     try {
       const data = await explainSubQuestion(question, r.aggregated_context || '', r.api_results || []);
       setSubQData(data);
@@ -146,7 +149,7 @@ export default function Results({ result: r }) {
 
             {/* ── Sub-question detail panel ── */}
             {activeSubQ && (
-              <div className="subq-panel">
+              <div className="subq-panel" ref={subQRef}>
                 <div className="subq-panel-header">
                   <span className="subq-panel-icon">🔍</span>
                   <div className="subq-panel-question">{activeSubQ}</div>
@@ -168,20 +171,20 @@ export default function Results({ result: r }) {
                         <div className="ref-papers-grid">
                           {subQData.papers.map((p, i) => {
                             const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
+                            const canAct = p.url || p.abstract;
+                            const Tag = canAct ? 'button' : 'div';
                             return (
-                              <button key={i} className="ref-paper-card"
-                                onClick={() => p.canDive !== false && setDivePaper(p)}
-                                style={{ cursor: p.canDive === false && !p.url ? 'default' : 'pointer' }}>
+                              <Tag key={i} className="ref-paper-card"
+                                {...(canAct ? { onClick: () => p.abstract || p.url ? setDivePaper(p) : window.open(p.url, '_blank') } : {})}
+                                style={{ cursor: canAct ? 'pointer' : 'default' }}>
                                 <div className="ref-paper-top">
                                   <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
                                   {p.year && <span className="ref-paper-year">{p.year}</span>}
                                 </div>
                                 <div className="ref-paper-title">{p.title}</div>
                                 {p.abstract && <div className="ref-paper-abstract">{p.abstract.slice(0,120)}{p.abstract.length>120?'…':''}</div>}
-                                <div className="ref-paper-cta">
-                                  {p.url || p.abstract ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : 'No full text available'}
-                                </div>
-                              </button>
+                                {canAct && <div className="ref-paper-cta">Summarize & Visualize →</div>}
+                              </Tag>
                             );
                           })}
                         </div>
