@@ -279,6 +279,8 @@ async def explain_subquestion(req: SubQuestionReq):
                 "Explain concepts clearly — include how/why, not just what. "
                 "Plain text only, no JSON."
             )
+        async def execute(self, state):
+            raise NotImplementedError
 
     agent = _QuickAgent()
     prompt = (
