@@ -133,16 +133,34 @@ class PaperVisualizerAgent(BaseAgent):
             extra={"session_id": session_id, "chunks": len(chunks), "chars": len(context)},
         )
 
-        prompt = (
+        # ── Call 1: architecture diagram (focused prompt) ────────────────────
+        arch_prompt = (
             f"Paper excerpts:\n\n{context}\n\n"
-            "Extract the concept map, method flow, and result charts as JSON."
+            "Extract ONLY the architecture_diagram as JSON. "
+            "Return ONLY this JSON object, nothing else:\n"
+            '{"architecture_diagram": {"title": "...", "nodes": [...], "edges": [...]}}'
         )
+        arch_raw = await self.call_llm(arch_prompt)
+        arch_parsed = safe_json_parse(arch_raw) or {}
 
-        raw = await self.call_llm(prompt)
-        parsed = safe_json_parse(raw)
+        # ── Call 2: concept map + method flow ────────────────────────────────
+        rest_prompt = (
+            f"Paper excerpts:\n\n{context}\n\n"
+            "Return ONLY this compact JSON (max 6 concept nodes, max 5 method steps, "
+            "labels ≤4 words, descriptions ≤8 words, no trailing text):\n"
+            '{"concept_map":{"nodes":[{"id":"c1","label":"...","type":"concept|finding|method|theory","description":"..."}],'
+            '"edges":[{"source":"c1","target":"c2","label":"enables"}]},'
+            '"method_flow":{"nodes":[{"id":"s1","label":"...","description":"..."}],'
+            '"edges":[{"source":"s1","target":"s2"}]},'
+            '"charts":[{"type":"bar","title":"...","data":[{"name":"...","value":0}]}]}'
+        )
+        rest_raw = await self.call_llm(rest_prompt)
+        rest_parsed = safe_json_parse(rest_raw) or {}
 
-        if not parsed or not isinstance(parsed, dict):
-            logger.warning("Visualizer: failed to parse JSON, returning empty")
+        parsed = {**arch_parsed, **rest_parsed}
+
+        if not parsed:
+            logger.warning("Visualizer: failed to parse JSON from both calls, returning empty")
             return _empty_viz()
 
         # Validate and fill defaults
@@ -156,6 +174,7 @@ class PaperVisualizerAgent(BaseAgent):
         logger.info(
             "Visualization complete",
             extra={
+                "arch": len(result["architecture_diagram"]["nodes"]),
                 "concepts": len(result["concept_map"]["nodes"]),
                 "steps": len(result["method_flow"]["nodes"]),
                 "charts": len(result["charts"]),

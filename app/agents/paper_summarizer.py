@@ -96,6 +96,19 @@ class PaperSummarizerAgent(BaseAgent):
         parsed = safe_json_parse(raw)
 
         if parsed and isinstance(parsed, dict):
+            # Smaller LLMs sometimes embed the full JSON inside a text field.
+            # Detect: if core_innovation or tldr looks like a JSON object, try
+            # parsing it — that's the real summary.
+            for field in ("core_innovation", "tldr", "abstract_summary"):
+                val = parsed.get(field, "")
+                if isinstance(val, str) and val.strip().startswith("{"):
+                    inner = safe_json_parse(val.strip())
+                    if isinstance(inner, dict) and "title" in inner and "core_innovation" in inner:
+                        parsed = inner
+                        break
+                elif isinstance(val, dict) and "title" in val:
+                    parsed = val
+                    break
             summary = parsed
         else:
             logger.warning("Failed to parse structured summary, using fallback")
