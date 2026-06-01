@@ -119,6 +119,21 @@ class ReasoningAgent(BaseAgent):
             visualizations = parsed.get("visualizations", [])
             references = parsed.get("references", [])
 
+            # Some models embed the full JSON inside the answer field.
+            # Detect and unwrap: if answer looks like JSON, try to extract
+            # a nested answer key, or fall back to plain text from raw.
+            if isinstance(answer, str) and answer.strip().startswith("{"):
+                inner = safe_json_parse(answer.strip())
+                if isinstance(inner, dict) and "answer" in inner:
+                    answer = inner.get("answer", answer)
+                    visualizations = inner.get("visualizations", visualizations)
+                    references = inner.get("references", references)
+                else:
+                    # Completely malformed — use the raw LLM output stripped of JSON
+                    # Try to find any plain text before the first {
+                    pre_json = raw.split("{")[0].strip()
+                    answer = pre_json if len(pre_json) > 50 else raw
+
         logger.info(
             "Reasoning complete",
             extra={

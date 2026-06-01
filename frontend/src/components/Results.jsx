@@ -27,12 +27,16 @@ function extractPapers(api_results) {
       const key = (p.url || p.title || '').toLowerCase();
       if (!key || seen.has(key)) continue;
       seen.add(key);
+      const url      = p.url   || '';
+      const abstract = p.summary || p.abstract || '';
+      // Only include papers we can actually deep-dive — need a URL or abstract
+      if (!url && !abstract) continue;
       out.push({
-        title:    p.title || 'Untitled',
-        url:      p.url   || '',
-        abstract: p.summary || p.abstract || '',
-        year:     p.year  || '',
-        doi:      p.doi   || '',
+        title: p.title || 'Untitled',
+        url,
+        abstract,
+        year:   p.year  || '',
+        doi:    p.doi   || '',
         source,
       });
     }
