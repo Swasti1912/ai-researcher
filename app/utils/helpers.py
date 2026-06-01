@@ -74,14 +74,52 @@ def safe_json(raw: str, fallback: Any = None) -> Any:
 
     Returns *fallback* when parsing fails.
     """
+    import re
+
     s = raw.strip()
+    # Strip ``` fences (```json or plain ```)
     if s.startswith("```"):
         s = s.split("\n", 1)[-1]
     if s.endswith("```"):
         s = s.rsplit("```", 1)[0]
     s = s.strip()
+
+    # Fast path — valid JSON
     try:
         return json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # LLMs sometimes embed literal newlines inside string values instead of \n.
+    # Replace newlines that are inside JSON strings with the escape sequence.
+    def _escape_string_newlines(text: str) -> str:
+        result = []
+        in_string = False
+        escaped = False
+        for ch in text:
+            if escaped:
+                result.append(ch)
+                escaped = False
+                continue
+            if ch == "\\":
+                result.append(ch)
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+                continue
+            if in_string and ch == "\n":
+                result.append("\\n")
+                continue
+            if in_string and ch == "\r":
+                result.append("\\r")
+                continue
+            result.append(ch)
+        return "".join(result)
+
+    try:
+        return json.loads(_escape_string_newlines(s))
     except (json.JSONDecodeError, ValueError):
         _log.warning("safe_json parse failed", extra={"preview": s[:200]})
         return fallback

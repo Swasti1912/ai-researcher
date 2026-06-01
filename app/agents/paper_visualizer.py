@@ -39,41 +39,60 @@ class PaperVisualizerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return (
-            "You are an expert at reading academic research papers and extracting "
-            "structured information for visualization.\n\n"
-            "Given paper excerpts, extract THREE things and return ONLY valid JSON "
-            "(no markdown, no explanation):\n\n"
+            "You are an expert at reading academic papers and producing EDUCATIONAL visualizations.\n\n"
+            "Given paper excerpts, return ONLY valid JSON with FOUR visualization objects.\n\n"
             "{\n"
-            '  "concept_map": {\n'
+            '  "architecture_diagram": {\n'
+            '    "title": "e.g. Transformer Architecture or System Pipeline",\n'
             '    "nodes": [\n'
-            '      {"id": "c1", "label": "Short concept name", "type": "concept|finding|method|theory", "description": "1-sentence explanation"}\n'
+            '      {\n'
+            '        "id": "n1",\n'
+            '        "label": "Short component name",\n'
+            '        "type": "input|embedding|attention|feedforward|normalization|encoder|decoder|conv|pooling|output|linear|general",\n'
+            '        "layer": 0,\n'
+            '        "description": "What this component does + key dimensions/params if known"\n'
+            '      }\n'
             '    ],\n'
             '    "edges": [\n'
-            '      {"source": "c1", "target": "c2", "label": "relationship verb (e.g. enables, uses, influences, leads to)"}\n'
+            '      {"source": "n1", "target": "n2", "label": "e.g. 512-dim, residual, or empty"}\n'
+            '    ]\n'
+            '  },\n'
+            '  "concept_map": {\n'
+            '    "nodes": [\n'
+            '      {"id": "c1", "label": "Short concept", "type": "concept|finding|method|theory", "description": "1-sentence explanation"}\n'
+            '    ],\n'
+            '    "edges": [\n'
+            '      {"source": "c1", "target": "c2", "label": "enables|uses|influences|leads to|compares to"}\n'
             '    ]\n'
             '  },\n'
             '  "method_flow": {\n'
             '    "nodes": [\n'
-            '      {"id": "s1", "label": "Step name", "description": "What was done in this step"}\n'
+            '      {"id": "s1", "label": "Step name", "description": "What was done"}\n'
             '    ],\n'
-            '    "edges": [\n'
-            '      {"source": "s1", "target": "s2"}\n'
-            '    ]\n'
+            '    "edges": [{"source": "s1", "target": "s2"}]\n'
             '  },\n'
             '  "charts": [\n'
-            '    {\n'
-            '      "type": "bar",\n'
-            '      "title": "Chart title",\n'
-            '      "data": [{"name": "Category", "value": 42}]\n'
-            '    }\n'
+            '    {"type": "bar", "title": "Chart title", "data": [{"name": "Label", "value": 42}]}\n'
             '  ]\n'
             "}\n\n"
-            "Rules:\n"
-            "- concept_map: 6-12 nodes, keep labels SHORT (2-4 words). Connect meaningful relationships.\n"
-            "- method_flow: 4-8 sequential steps. If the paper has no clear methodology, infer from the paper structure.\n"
-            "- charts: Only include if the paper contains REAL numbers/percentages/scores. Empty array [] if none.\n"
-            "- All node ids must be unique strings.\n"
-            "- Return ONLY the JSON object, nothing else."
+            "ARCHITECTURE DIAGRAM RULES (most important — read carefully):\n"
+            "- Assign each node a 'layer' integer: 0 = input/raw data, increasing numbers = deeper processing.\n"
+            "- Nodes on the SAME layer (same integer) are shown SIDE BY SIDE horizontally.\n"
+            "- Model architecture papers (Transformer, BERT, CNN, RNN, GAN, etc.): extract the ACTUAL component stack.\n"
+            "  Example Transformer layers: 0=Input Tokens, 1=Embeddings+Positional, 2=Multi-Head Attention,\n"
+            "  3=Add & Norm, 4=Feed-Forward, 5=Add & Norm, 6=Output (repeat encoder for decoder).\n"
+            "- Non-model papers: show the system pipeline stages as layers (data collection → processing → analysis → output).\n"
+            "- Include REAL dimensions/params in descriptions and edge labels when mentioned in the paper.\n"
+            "- Use 6-14 nodes. Keep labels SHORT (2-4 words). Descriptions explain the WHY.\n"
+            "- Parallel components (e.g., Q/K/V projections, multiple attention heads) = same layer number.\n\n"
+            "CONCEPT MAP RULES:\n"
+            "- 6-12 nodes. Focus on ideas, not architecture components (those go in architecture_diagram).\n"
+            "- Edge labels must be verbs: enables, uses, influences, motivates, extends, contrasts with.\n\n"
+            "METHOD FLOW RULES:\n"
+            "- 4-8 sequential steps of the experimental/research methodology.\n\n"
+            "CHARTS RULES:\n"
+            "- Only include if the paper contains REAL numbers/scores/percentages. Empty [] if none.\n\n"
+            "Return ONLY the JSON object. No markdown fences, no explanation."
         )
 
     async def visualize(
@@ -92,6 +111,7 @@ class PaperVisualizerAgent(BaseAgent):
 
         # Pull broad coverage chunks — use multiple queries to get different parts
         queries = [
+            "model architecture components layers encoder decoder attention embedding",
             "main concepts contributions key ideas",
             "methodology research design procedure steps",
             "results findings numbers statistics conclusions",
@@ -127,6 +147,7 @@ class PaperVisualizerAgent(BaseAgent):
 
         # Validate and fill defaults
         result = {
+            "architecture_diagram": _validate_arch(parsed.get("architecture_diagram", {})),
             "concept_map": _validate_graph(parsed.get("concept_map", {})),
             "method_flow": _validate_graph(parsed.get("method_flow", {})),
             "charts": _validate_charts(parsed.get("charts", [])),
@@ -149,7 +170,12 @@ class PaperVisualizerAgent(BaseAgent):
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _empty_viz() -> Dict[str, Any]:
-    return {"concept_map": {"nodes": [], "edges": []}, "method_flow": {"nodes": [], "edges": []}, "charts": []}
+    return {
+        "architecture_diagram": {"title": "", "nodes": [], "edges": []},
+        "concept_map": {"nodes": [], "edges": []},
+        "method_flow": {"nodes": [], "edges": []},
+        "charts": [],
+    }
 
 
 def _validate_graph(g: Any) -> Dict[str, Any]:
@@ -158,6 +184,21 @@ def _validate_graph(g: Any) -> Dict[str, Any]:
     return {
         "nodes": g.get("nodes", []) if isinstance(g.get("nodes"), list) else [],
         "edges": g.get("edges", []) if isinstance(g.get("edges"), list) else [],
+    }
+
+
+def _validate_arch(a: Any) -> Dict[str, Any]:
+    if not isinstance(a, dict):
+        return {"title": "", "nodes": [], "edges": []}
+    nodes = a.get("nodes", []) if isinstance(a.get("nodes"), list) else []
+    # Ensure each node has a layer int
+    for n in nodes:
+        if not isinstance(n.get("layer"), int):
+            n["layer"] = 0
+    return {
+        "title": a.get("title", ""),
+        "nodes": nodes,
+        "edges": a.get("edges", []) if isinstance(a.get("edges"), list) else [],
     }
 
 

@@ -139,6 +139,7 @@ class PaperVisualizeReq(BaseModel):
 
 class PaperVisualizeResp(BaseModel):
     session_id: str = ""
+    architecture_diagram: Dict[str, Any] = {}
     concept_map: Dict[str, Any] = {}
     method_flow: Dict[str, Any] = {}
     charts: List[Dict[str, Any]] = []
@@ -161,6 +162,11 @@ class PaperTeachResp(BaseModel):
     chapters: List[Dict[str, Any]] = []
     how_it_all_fits: str = ""
     paper_in_one_sentence: str = ""
+
+class FetchPaperReq(BaseModel):
+    url: str = ""        # arXiv abs or PDF URL
+    abstract: str = ""   # fallback plain text (for non-arXiv sources)
+    title: str = ""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -452,6 +458,101 @@ async def teach_paper(req: PaperTeachReq):
     except Exception as exc:
         _log.error("Teach error", extra={"err": str(exc)})
         raise HTTPException(500, str(exc))
+
+
+@router.post("/paper/from-url", response_model=UploadResp)
+async def paper_from_url(req: FetchPaperReq):
+    """
+    Fetch a paper by URL (arXiv abs/PDF) or use supplied abstract text.
+    Extracts text, embeds into Qdrant, returns a session_id exactly like
+    /upload-paper — so the caller can immediately use /paper/summarize,
+    /paper/ask, and /paper/visualize on the result.
+    """
+    import re
+    import httpx
+
+    title = req.title or "external_paper"
+    filename = re.sub(r"[^a-z0-9_]", "_", title.lower())[:60] + ".pdf"
+    text = ""
+
+    # ── Try to fetch paper content from arXiv ────────────────────────────────
+    if req.url:
+        url = req.url.strip()
+        # Convert abs URL → PDF URL  e.g. arxiv.org/abs/2401.12345 → /pdf/2401.12345
+        pdf_url = re.sub(r"arxiv\.org/abs/", "arxiv.org/pdf/", url)
+        if not pdf_url.endswith(".pdf"):
+            pdf_url = pdf_url.rstrip("/")
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(
+                    pdf_url,
+                    headers={"User-Agent": "AI-Researcher/1.0 (research tool; mailto:noreply@example.com)"},
+                )
+            if resp.status_code == 200 and resp.content:
+                def _parse_pdf(content: bytes) -> str:
+                    import PyPDF2, io
+                    try:
+                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(content)).pages)
+                    except Exception:
+                        return ""
+                text = await asyncio.to_thread(_parse_pdf, resp.content)
+        except Exception as exc:
+            _log.warning("PDF fetch failed", extra={"url": pdf_url, "err": str(exc)})
+
+    # ── Fallback 1: supplied abstract / summary text ──────────────────────────
+    if not text.strip() and req.abstract:
+        text = req.abstract
+        filename = filename.replace(".pdf", ".txt")
+
+    # ── Fallback 2: search arXiv by title to find a PDF ──────────────────────
+    if not text.strip() and req.title:
+        try:
+            import urllib.parse
+            search_q = urllib.parse.quote_plus(f"ti:{req.title}")
+            arxiv_search = f"https://export.arxiv.org/api/query?search_query={search_q}&max_results=1"
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                sr = await client.get(arxiv_search, headers={"User-Agent": "AI-Researcher/1.0"})
+            if sr.status_code == 200:
+                import xml.etree.ElementTree as ET
+                ns = {"a": "http://www.w3.org/2005/Atom"}
+                root = ET.fromstring(sr.text)
+                for entry in root.findall("a:entry", ns):
+                    for lnk in entry.findall("a:link", ns):
+                        if lnk.get("title") == "pdf":
+                            pdf_url = lnk.get("href", "").replace("http://", "https://")
+                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client2:
+                                pr = await client2.get(pdf_url, headers={"User-Agent": "AI-Researcher/1.0"})
+                            if pr.status_code == 200 and pr.content:
+                                def _parse2(c: bytes) -> str:
+                                    import PyPDF2, io
+                                    try:
+                                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(c)).pages)
+                                    except Exception:
+                                        return ""
+                                text = await asyncio.to_thread(_parse2, pr.content)
+                                if text.strip():
+                                    _log.info("arXiv title fallback succeeded", extra={"title": req.title})
+                                    break
+                    if text.strip():
+                        break
+        except Exception as exc:
+            _log.warning("arXiv title search failed", extra={"err": str(exc)})
+
+    if not text.strip():
+        raise HTTPException(404, "Paper text not available — no PDF URL, abstract, or matching arXiv entry found")
+
+    kb = get_kb()
+    session_id, doc_id = await asyncio.to_thread(kb.ingest, text, filename=filename)
+    _log.info("Ingested external paper", extra={"title": title, "session_id": session_id})
+    return UploadResp(
+        session_id=session_id,
+        doc_id=doc_id,
+        filename=filename,
+        text_length=len(text),
+        chunks=kb.get_session_meta(session_id).get("chunk_count", 0) if kb.get_session_meta(session_id) else 0,
+        text_preview=text[:500],
+    )
 
 
 @router.delete("/paper/session/{session_id}", response_model=SessionDeleteResp)
