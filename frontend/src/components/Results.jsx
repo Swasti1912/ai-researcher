@@ -171,20 +171,24 @@ export default function Results({ result: r }) {
                         <div className="ref-papers-grid">
                           {subQData.papers.map((p, i) => {
                             const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
-                            const canAct = p.url || p.abstract;
-                            const Tag = canAct ? 'button' : 'div';
+                            const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}`;
+                            const handleClick = () => {
+                              if (p.canDive || p.abstract) { setDivePaper(p); }
+                              else if (p.url) { window.open(p.url, '_blank'); }
+                              else { window.open(scholarUrl, '_blank'); }
+                            };
                             return (
-                              <Tag key={i} className="ref-paper-card"
-                                {...(canAct ? { onClick: () => p.abstract || p.url ? setDivePaper(p) : window.open(p.url, '_blank') } : {})}
-                                style={{ cursor: canAct ? 'pointer' : 'default' }}>
+                              <button key={i} className="ref-paper-card" onClick={handleClick}>
                                 <div className="ref-paper-top">
                                   <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
                                   {p.year && <span className="ref-paper-year">{p.year}</span>}
                                 </div>
                                 <div className="ref-paper-title">{p.title}</div>
                                 {p.abstract && <div className="ref-paper-abstract">{p.abstract.slice(0,120)}{p.abstract.length>120?'…':''}</div>}
-                                {canAct && <div className="ref-paper-cta">Summarize & Visualize →</div>}
-                              </Tag>
+                                <div className="ref-paper-cta">
+                                  {(p.canDive || p.abstract) ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : '🔍 Search on Google Scholar →'}
+                                </div>
+                              </button>
                             );
                           })}
                         </div>
@@ -206,12 +210,14 @@ export default function Results({ result: r }) {
                 <div className="ref-papers-grid">
                   {papers.map((p, i) => {
                     const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
+                    const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}`;
+                    const handleClick = () => {
+                      if (p.canDive) { setDivePaper(p); }
+                      else if (p.url) { window.open(p.url, '_blank'); }
+                      else { window.open(scholarUrl, '_blank'); }
+                    };
                     return (
-                      <button
-                        key={i}
-                        className="ref-paper-card"
-                        onClick={() => p.canDive ? setDivePaper(p) : p.url && window.open(p.url, '_blank')}
-                      >
+                      <button key={i} className="ref-paper-card" onClick={handleClick}>
                         <div className="ref-paper-top">
                           <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
                           {p.year && <span className="ref-paper-year">{p.year}</span>}
@@ -223,7 +229,7 @@ export default function Results({ result: r }) {
                           </div>
                         )}
                         <div className="ref-paper-cta">
-                          {p.canDive ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : 'Search on Scholar →'}
+                          {p.canDive ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : '🔍 Search on Google Scholar →'}
                         </div>
                       </button>
                     );
