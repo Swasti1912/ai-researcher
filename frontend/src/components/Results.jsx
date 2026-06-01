@@ -171,24 +171,39 @@ export default function Results({ result: r }) {
                         <div className="ref-papers-grid">
                           {subQData.papers.map((p, i) => {
                             const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
-                            const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}`;
-                            const handleClick = () => {
-                              if (p.canDive || p.abstract) { setDivePaper(p); }
-                              else if (p.url) { window.open(p.url, '_blank'); }
-                              else { window.open(scholarUrl, '_blank'); }
-                            };
-                            return (
-                              <button key={i} className="ref-paper-card" onClick={handleClick}>
+                            if (p.canDive || p.abstract) return (
+                              <button key={i} className="ref-paper-card" onClick={() => setDivePaper(p)}>
                                 <div className="ref-paper-top">
                                   <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
                                   {p.year && <span className="ref-paper-year">{p.year}</span>}
                                 </div>
                                 <div className="ref-paper-title">{p.title}</div>
                                 {p.abstract && <div className="ref-paper-abstract">{p.abstract.slice(0,120)}{p.abstract.length>120?'…':''}</div>}
-                                <div className="ref-paper-cta">
-                                  {(p.canDive || p.abstract) ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : '🔍 Search on Google Scholar →'}
-                                </div>
+                                <div className="ref-paper-cta">Summarize &amp; Visualize →</div>
                               </button>
+                            );
+                            if (p.url) return (
+                              <a key={i} className="ref-paper-card" href={p.url} target="_blank" rel="noopener noreferrer"
+                                 style={{ textDecoration:'none', display:'flex', flexDirection:'column', gap:5 }}>
+                                <div className="ref-paper-top">
+                                  <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
+                                  {p.year && <span className="ref-paper-year">{p.year}</span>}
+                                </div>
+                                <div className="ref-paper-title">{p.title}</div>
+                                <div className="ref-paper-cta">↗ Open source</div>
+                              </a>
+                            );
+                            return (
+                              <div key={i} className="ref-paper-card" style={{ cursor:'default' }}>
+                                <div className="ref-paper-top">
+                                  <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
+                                  {p.year && <span className="ref-paper-year">{p.year}</span>}
+                                </div>
+                                <div className="ref-paper-title">{p.title}</div>
+                                <div className="ref-paper-cta" style={{ color:'var(--t3)', fontSize:'.62rem' }}>
+                                  Search this title on Scholar or Semantic Scholar
+                                </div>
+                              </div>
                             );
                           })}
                         </div>
@@ -210,28 +225,47 @@ export default function Results({ result: r }) {
                 <div className="ref-papers-grid">
                   {papers.map((p, i) => {
                     const sm = SOURCE_META[p.source] || SOURCE_META.arxiv;
-                    const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}`;
-                    const handleClick = () => {
-                      if (p.canDive) { setDivePaper(p); }
-                      else if (p.url) { window.open(p.url, '_blank'); }
-                      else { window.open(scholarUrl, '_blank'); }
-                    };
+                    // canDive = has URL or abstract → open deep-dive modal
+                    // has URL only → open as anchor link
+                    // nothing → non-interactive info card
+                    if (p.canDive) {
+                      return (
+                        <button key={i} className="ref-paper-card" onClick={() => setDivePaper(p)}>
+                          <div className="ref-paper-top">
+                            <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
+                            {p.year && <span className="ref-paper-year">{p.year}</span>}
+                          </div>
+                          <div className="ref-paper-title">{p.title}</div>
+                          {p.abstract && <div className="ref-paper-abstract">{p.abstract.slice(0,120)}{p.abstract.length>120?'…':''}</div>}
+                          <div className="ref-paper-cta">Summarize &amp; Visualize →</div>
+                        </button>
+                      );
+                    }
+                    if (p.url) {
+                      return (
+                        <a key={i} className="ref-paper-card" href={p.url} target="_blank" rel="noopener noreferrer"
+                           style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          <div className="ref-paper-top">
+                            <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
+                            {p.year && <span className="ref-paper-year">{p.year}</span>}
+                          </div>
+                          <div className="ref-paper-title">{p.title}</div>
+                          <div className="ref-paper-cta">↗ Open source</div>
+                        </a>
+                      );
+                    }
+                    // No URL, no abstract — info card only
                     return (
-                      <button key={i} className="ref-paper-card" onClick={handleClick}>
+                      <div key={i} className="ref-paper-card" style={{ cursor: 'default' }}>
                         <div className="ref-paper-top">
                           <span className="ref-paper-src" style={{ color: sm.color }}>{sm.icon} {sm.label}</span>
                           {p.year && <span className="ref-paper-year">{p.year}</span>}
                         </div>
                         <div className="ref-paper-title">{p.title}</div>
-                        {p.abstract && (
-                          <div className="ref-paper-abstract">
-                            {p.abstract.slice(0, 120)}{p.abstract.length > 120 ? '…' : ''}
-                          </div>
-                        )}
-                        <div className="ref-paper-cta">
-                          {p.canDive ? 'Summarize & Visualize →' : p.url ? '↗ Open source' : '🔍 Search on Google Scholar →'}
+                        <div className="ref-paper-cta" style={{ color: 'var(--t3)', fontSize: '.62rem' }}>
+                          Search this title on Scholar or Semantic Scholar
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
