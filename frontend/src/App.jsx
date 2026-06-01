@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Header from './components/Header';
 import QueryInput from './components/QueryInput';
 import Pipeline from './components/Pipeline';
@@ -18,6 +18,15 @@ const STEPS = [
 ];
 
 export default function App() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+
   const [mode, setMode]           = useState('research'); // 'research' | 'paper'
   const [query, setQuery]         = useState('');
   const [paper, setPaper]         = useState(null);
@@ -61,7 +70,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header />
+      <Header theme={theme} onThemeToggle={toggleTheme} />
 
       {/* Mode toggle */}
       <div className="mode-bar">

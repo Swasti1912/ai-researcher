@@ -1,8 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════
-   AI Researcher – Dark command-centre
+   AI Researcher – Dark + Light themes
    Font: Sora (display) + Fira Code (mono)
    Palette: warm orange (agents) + organic green (results)
    ═══════════════════════════════════════════════════════════════ */
+
+/* ── Dark theme (default) ─────────────────────────────────────── */
 :root{
   --bg0:#060a11;--bg1:#0b1120;--bg2:#111b2e;--bg3:#182640;
   --bdr:#1e3050;--bdr-hi:#e07520;
@@ -14,6 +16,20 @@
   --yellow:#d4a820;--yellow-d:rgba(212,168,32,.12);
   --f:'Sora',system-ui,sans-serif;--m:'Fira Code','Menlo',monospace;
   --r:10px;--rs:6px;
+  --shadow:0 2px 12px rgba(0,0,0,.4);
+}
+
+/* ── Light theme ──────────────────────────────────────────────── */
+[data-theme="light"]{
+  --bg0:#f0f2f7;--bg1:#ffffff;--bg2:#f7f8fc;--bg3:#edf0f8;
+  --bdr:#d4daea;--bdr-hi:#e07520;
+  --t0:#111827;--t1:#374151;--t2:#6b7280;--t3:#9ca3af;
+  --orange:#d96b10;--orange-l:#e07520;--orange-d:rgba(217,107,16,.10);
+  --green:#16a34a;--green-l:#22c55e;--green-d:rgba(22,163,74,.10);
+  --blue:#2563eb;--blue-d:rgba(37,99,235,.10);
+  --red:#dc2626;--red-d:rgba(220,38,38,.10);
+  --yellow:#ca8a04;--yellow-d:rgba(202,138,4,.10);
+  --shadow:0 2px 12px rgba(0,0,0,.10);
 }
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html,body,#root{height:100%}
