@@ -40,17 +40,13 @@ class _Reasoning(BaseAgent):
     def system_prompt(self) -> str:
         return (
             "You are the Reasoning Agent of an AI Research Assistant.\n\n"
-            "You receive:\n"
-            "  • Refined question + intent + domain\n"
-            "  • Aggregated API context\n"
-            "  • Knowledge base (RAG) passages\n\n"
-            "Task:\n"
-            "1. Synthesise a comprehensive answer citing sources.\n"
-            "2. Structure with clear sections.\n"
-            "3. If data supports it, include a 'visualizations' list.\n\n"
-            "Return JSON: {\"answer\":\"...\",\"visualizations\":[{\"type\":\"bar|line|pie|table\","
-            "\"title\":\"...\",\"data\":{...}}],\"references\":[\"...\"]}\n\n"
-            "If you cannot produce JSON, return the answer as plain text."
+            "Write a comprehensive, well-structured research answer in plain Markdown.\n\n"
+            "Rules:\n"
+            "1. Use ## for main sections, ### for sub-sections.\n"
+            "2. Cite sources inline, e.g. [Vaswani et al., 2017].\n"
+            "3. Be thorough — explain concepts, mechanisms, and implications.\n"
+            "4. Output ONLY the Markdown answer text.\n"
+            "5. Do NOT wrap in JSON. Do NOT append code blocks, arrays, or references lists."
         )
 
     async def execute(self, state: ResearchState) -> Dict[str, Any]:
@@ -71,24 +67,38 @@ class _Reasoning(BaseAgent):
             f"--- RAG Passages ---\n{truncate(rag_text, 2000)}\n\nSynthesise."
         )
 
+        import re as _re
         raw = await self.call_llm(prompt)
-        answer, vizs, refs = raw, [], []
-        parsed = safe_json(raw)
-        if parsed and isinstance(parsed, dict):
-            answer = parsed.get("answer", raw)
-            vizs = parsed.get("visualizations", [])
-            raw_refs = parsed.get("references", [])
-            # Ensure refs is always List[str] — LLMs sometimes return dicts
-            if isinstance(raw_refs, list):
-                refs = [
-                    r if isinstance(r, str) else (r.get("title") or r.get("text") or str(r))
-                    for r in raw_refs
-                ]
-            elif isinstance(raw_refs, dict):
-                refs = list(raw_refs.values())
-            # Ensure vizs is always a list
-            if not isinstance(vizs, list):
-                vizs = []
+        vizs, refs = [], []
+        answer = raw.strip()
+
+        # Strip any ``` code fences
+        answer = _re.sub(r'^```(?:json|markdown)?\s*\n?', '', answer)
+        answer = _re.sub(r'\n?```\s*$', '', answer).strip()
+
+        # If model still returned JSON despite instructions, extract the answer field
+        if answer.lstrip().startswith('{'):
+            parsed = safe_json(answer)
+            if parsed and isinstance(parsed, dict):
+                answer = parsed.get("answer", answer)
+                vizs = parsed.get("visualizations", []) or []
+                raw_refs = parsed.get("references", [])
+                refs = [r if isinstance(r, str) else str(r) for r in raw_refs] if isinstance(raw_refs, list) else []
+
+        # Find and remove any trailing JSON array/object (references list embedded in text)
+        # Pattern: a standalone [ or { on its own line followed by a quoted string line
+        m = _re.search(r'\n[ \t]*[\[\{][ \t]*\n[ \t]*"', answer)
+        if m:
+            answer = answer[:m.start()].rstrip()
+
+        # Final sweep: strip lone trailing brackets/braces/fences one at a time
+        for _ in range(5):
+            prev = answer
+            answer = _re.sub(r'\s*```\s*$', '', answer)
+            answer = _re.sub(r'\s*[\]\}\[]\s*$', '', answer)
+            if answer == prev:
+                break
+        answer = answer.strip()
 
         _log.info("Reasoning", extra={"ans_len": len(answer), "vizs": len(vizs), "refs": len(refs), "rag": len(rag)})
         return {"reasoning_output": answer, "visualizations": vizs, "rag_references": refs, "current_agent": self.name}

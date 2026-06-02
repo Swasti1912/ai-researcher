@@ -52,20 +52,14 @@ class ReasoningAgent(BaseAgent):
             "  • Its intent classification\n"
             "  • Aggregated data from external APIs\n"
             "  • Relevant passages from a knowledge base (RAG)\n\n"
-            "Your task:\n"
-            "1. Synthesise all information into a comprehensive answer.\n"
-            "2. Cite sources by paper title or API name.\n"
-            "3. Structure the answer with clear sections.\n"
-            "4. Where the data supports it, include a 'visualizations' list.\n\n"
-            "Return a JSON object:\n"
-            "{\n"
-            '  "answer": "Your comprehensive answer…",\n'
-            '  "visualizations": [\n'
-            '    {"type":"bar|line|pie|table","title":"…","data":{…}}\n'
-            "  ],\n"
-            '  "references": ["Source 1", "Source 2"]\n'
-            "}\n\n"
-            "If you cannot produce JSON, return the answer as plain text."
+            "Write a comprehensive, well-structured research answer in plain Markdown.\n\n"
+            "Rules:\n"
+            "1. Use ## for main sections, ### for sub-sections.\n"
+            "2. Cite sources inline by paper title (e.g. [Vaswani et al., 2017]).\n"
+            "3. Be thorough — explain concepts, mechanisms, and implications.\n"
+            "4. End your answer naturally. Do NOT append JSON, arrays, code blocks,\n"
+            "   or any non-Markdown content after the answer text.\n"
+            "5. Output ONLY the Markdown answer — no preamble, no JSON wrapper."
         )
 
     async def execute(self, state: ResearchState) -> Dict[str, Any]:
@@ -108,39 +102,46 @@ class ReasoningAgent(BaseAgent):
 
         raw = await self.call_llm(prompt)
 
-        # 3. Try structured parse; fall back to raw text
-        answer = raw
+        # 3. Extract clean markdown — strip all JSON artifacts
+        import re
         visualizations: List[Dict[str, Any]] = []
         references: List[str] = []
+        answer = raw.strip()
 
-        parsed = safe_json_parse(raw)
-        if parsed and isinstance(parsed, dict):
-            answer = parsed.get("answer", raw)
-            visualizations = parsed.get("visualizations", [])
-            references = parsed.get("references", [])
+        # Strip outer ``` fences
+        answer = re.sub(r'^```(?:json|markdown)?\s*\n?', '', answer)
+        answer = re.sub(r'\n?```\s*$', '', answer).strip()
 
-            # Some models embed the full JSON inside the answer field.
-            # Detect and unwrap: if answer looks like JSON, try to extract
-            # a nested answer key, or fall back to plain text from raw.
-            if isinstance(answer, str) and answer.strip().startswith("{"):
-                inner = safe_json_parse(answer.strip())
-                if isinstance(inner, dict) and "answer" in inner:
-                    answer = inner.get("answer", answer)
-                    visualizations = inner.get("visualizations", visualizations)
-                    references = inner.get("references", references)
-                else:
-                    # Completely malformed — use the raw LLM output stripped of JSON
-                    # Try to find any plain text before the first {
-                    pre_json = raw.split("{")[0].strip()
-                    answer = pre_json if len(pre_json) > 50 else raw
+        # If JSON slipped through, try to extract the answer field
+        if answer.lstrip().startswith("{"):
+            parsed = safe_json_parse(answer)
+            if parsed and isinstance(parsed, dict):
+                answer = parsed.get("answer", answer)
+                visualizations = parsed.get("visualizations", [])
+                references = parsed.get("references", [])
 
-        # Strip trailing JSON fence / bracket artifacts that some models leak
-        if isinstance(answer, str):
-            import re
-            # Remove trailing ``` fences, lone ] or } lines, and blank lines
-            answer = re.sub(r'\s*```\s*$', '', answer.rstrip())
-            answer = re.sub(r'\s*[\]\}]\s*$', '', answer.rstrip())
-            answer = answer.strip()
+        # Aggressive cleanup: find where the real Markdown text ends.
+        # Models often append a JSON references array after the answer.
+        # Strategy: find the last position that ends a real sentence or
+        # Markdown block, before any JSON structure starts.
+        #
+        # Pattern: a JSON array of references looks like:
+        #   \n[\n  "Source...",\n  "Source..."\n]\n}
+        # OR an inline list like:
+        #   \n  [\n    "..."\n  ]\n}
+        #
+        # Find the earliest standalone [ or { that begins a trailing JSON block.
+        _json_start = re.search(
+            r'\n\s*[\[\{]\s*\n\s*"',   # opening [ or { followed by a quoted line
+            answer
+        )
+        if _json_start:
+            answer = answer[:_json_start.start()].rstrip()
+
+        # Also strip any remaining trailing code fences or lone brackets/braces
+        answer = re.sub(r'\s*```\s*$', '', answer)
+        answer = re.sub(r'\s*[\]\}\[]\s*$', '', answer)
+        answer = answer.strip()
 
         logger.info(
             "Reasoning complete",
