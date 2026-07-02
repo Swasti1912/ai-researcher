@@ -150,6 +150,7 @@ class PaperVisualizeReq(BaseModel):
 class PaperVisualizeResp(BaseModel):
     session_id: str = ""
     concept_diagrams: List[Dict[str, Any]] = []   # Mermaid diagrams
+    equations: List[Dict[str, Any]] = []          # explained equations (KaTeX)
     charts: List[Dict[str, Any]] = []
     architecture_diagram: Dict[str, Any] = {}     # legacy (kept for compat)
     concept_map: Dict[str, Any] = {}

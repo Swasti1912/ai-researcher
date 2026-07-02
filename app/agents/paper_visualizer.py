@@ -82,11 +82,15 @@ E. MINDMAP: indentation ONLY, NO arrows. Root then indented branches. Example:
              Interest Rates
 F. No markdown, no HTML, no comments.
 
+For DESC, write 2 to 3 full sentences (not a fragment): explain what the diagram shows,
+how to read it, and the KEY INSIGHT or takeaway a reader should get from it. Be specific
+to this paper's content, not generic.
+
 OUTPUT FORMAT — return each diagram as a block in EXACTLY this shape, blocks separated by a line
 containing only three equals signs (===). Do NOT wrap anything in JSON or code fences:
 
 TITLE: <short title>
-DESC: <one sentence describing what this diagram shows>
+DESC: <2-3 sentences: what it shows, how to read it, and the key takeaway>
 TYPE: flowchart
 MERMAID:
 flowchart TD
@@ -103,6 +107,44 @@ timeline
   Phase 2 : Step B
 
 Begin now. Output ONLY the blocks."""
+
+
+# Prompt that extracts and EXPLAINS the key equations of a math/physics/quant paper.
+# Delimited format (not JSON) because LaTeX is full of backslashes/braces that break JSON.
+_EQUATIONS_PROMPT = r"""You are an expert at explaining the MATHEMATICS in a research paper.
+
+Paper excerpts:
+{context}
+
+If this paper contains important equations, formulas, or mathematical analysis
+(common in physics, math, statistics, ML theory, quantitative papers), extract the
+2 to 4 MOST IMPORTANT ones and explain each in plain language.
+
+If the paper has NO meaningful mathematics, output exactly: NONE
+
+RULES:
+- LATEX must be valid KaTeX (no $ signs, no \begin/\end environments). Examples:
+    E = mc^2
+    \hat{y} = \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+    i\hbar\frac{\partial}{\partial t}\Psi = \hat{H}\Psi
+- EXPLAIN: 2 to 3 sentences in plain English — what the equation represents, the intuition,
+  and why it matters in this paper.
+- TERMS: list each symbol and its meaning, separated by semicolons.
+
+OUTPUT FORMAT — one block per equation, separated by a line of three equals signs (===).
+Do NOT use JSON or code fences:
+
+NAME: <short name of the equation>
+LATEX: <the equation in KaTeX syntax, one line>
+EXPLAIN: <2-3 sentences>
+TERMS: <symbol = meaning; symbol = meaning; ...>
+===
+NAME: ...
+LATEX: ...
+EXPLAIN: ...
+TERMS: ...
+
+Begin now. Output ONLY the blocks, or NONE."""
 
 
 class PaperVisualizerAgent(BaseAgent):
@@ -210,7 +252,8 @@ class PaperVisualizerAgent(BaseAgent):
         )
 
         # ── Call 1: Mermaid concept & workflow diagrams (delimited text) ─────
-        diagrams_raw = await self.call_llm(_MERMAID_PROMPT.format(context=context))
+        # Use replace (not .format) — the prompts contain literal { } from LaTeX/labels.
+        diagrams_raw = await self.call_llm(_MERMAID_PROMPT.replace("{context}", context))
         concept_diagrams = _parse_diagram_blocks(diagrams_raw)
 
         # ── Call 2: numeric result charts (JSON) ────────────────────────────
@@ -224,22 +267,28 @@ class PaperVisualizerAgent(BaseAgent):
         charts_raw = await self.call_llm(charts_prompt)
         charts_parsed = safe_json_parse(charts_raw) or {}
 
+        # ── Call 3: key equations explained (math/physics papers) ────────────
+        equations_raw = await self.call_llm(_EQUATIONS_PROMPT.replace("{context}", context))
+        equations = _parse_equation_blocks(equations_raw)
+
         # Validate and fill defaults (legacy graph fields kept empty for API compat)
         result = {
             "concept_diagrams": concept_diagrams,
+            "equations": equations,
             "charts": _validate_charts(charts_parsed.get("charts", [])),
             "architecture_diagram": {"title": "", "nodes": [], "edges": []},
             "concept_map": {"nodes": [], "edges": []},
             "method_flow": {"nodes": [], "edges": []},
         }
 
-        if not result["concept_diagrams"] and not result["charts"]:
-            logger.warning("Visualizer: no diagrams or charts parsed")
+        if not result["concept_diagrams"] and not result["charts"] and not equations:
+            logger.warning("Visualizer: no diagrams, charts or equations parsed")
 
         logger.info(
             "Visualization complete",
             extra={
                 "diagrams": len(result["concept_diagrams"]),
+                "equations": len(equations),
                 "charts": len(result["charts"]),
             },
         )
@@ -254,11 +303,66 @@ class PaperVisualizerAgent(BaseAgent):
 def _empty_viz() -> Dict[str, Any]:
     return {
         "concept_diagrams": [],
+        "equations": [],
         "charts": [],
         "architecture_diagram": {"title": "", "nodes": [], "edges": []},
         "concept_map": {"nodes": [], "edges": []},
         "method_flow": {"nodes": [], "edges": []},
     }
+
+
+def _parse_equation_blocks(raw: str) -> List[Dict[str, Any]]:
+    """Parse the delimited equation format (NAME/LATEX/EXPLAIN/TERMS blocks)."""
+    if not raw or not raw.strip():
+        return []
+    text = raw.strip()
+    if text.upper().startswith("NONE") or text.upper() == "NONE":
+        return []
+    text = re.sub(r"^```(?:\w+)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+
+    out: List[Dict[str, Any]] = []
+    for block in re.split(r"\n\s*={3,}\s*\n", text):
+        if "LATEX:" not in block.upper():
+            continue
+        fields = {"name": "", "latex": "", "explain": "", "terms": ""}
+        cur = None
+        for line in block.splitlines():
+            m = re.match(r"\s*(NAME|LATEX|EXPLAIN|TERMS)\s*:\s*(.*)", line, re.IGNORECASE)
+            if m:
+                cur = m.group(1).lower()
+                fields[cur] = m.group(2).strip()
+            elif cur and line.strip():
+                fields[cur] += " " + line.strip()
+        latex = _clean_latex(fields["latex"])
+        if not latex:
+            continue
+        terms = []
+        for t in re.split(r"[;\n]", fields["terms"]):
+            if "=" in t:
+                sym, _, mean = t.partition("=")
+                if sym.strip() and mean.strip():
+                    terms.append({"symbol": sym.strip(), "meaning": mean.strip()})
+        out.append({
+            "name": fields["name"][:120] or "Equation",
+            "latex": latex,
+            "explanation": fields["explain"][:600],
+            "terms": terms[:8],
+        })
+    return out[:6]
+
+
+def _clean_latex(s: str) -> str:
+    """Strip $ delimiters / fences the model may add around KaTeX."""
+    if not s:
+        return ""
+    s = s.strip().strip("`").strip()
+    s = re.sub(r"^\$+", "", s)
+    s = re.sub(r"\$+$", "", s)
+    # Reject unsupported environments that KaTeX won't render
+    if "\\begin{" in s:
+        return ""
+    return s.strip()
 
 
 # Diagram types we accept from the model
@@ -305,7 +409,7 @@ def _parse_diagram_blocks(raw: str) -> List[Dict[str, Any]]:
             if key == "TITLE":
                 title = val[:120]
             elif key == "DESC":
-                desc = val[:300]
+                desc = val[:600]
             elif key == "TYPE":
                 v = val.lower().split()[0] if val else "flowchart"
                 dtype = v if v in _DIAGRAM_TYPES else "flowchart"

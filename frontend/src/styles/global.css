@@ -548,3 +548,18 @@ details[open]>summary::before{content:'▾'}
 .mmd-code-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t2);font-family:var(--m);font-size:.68rem;padding:4px 9px;cursor:pointer;transition:.15s;margin-left:auto}
 .mmd-code-toggle:hover{border-color:var(--orange);color:var(--orange)}
 .mmd-code{margin-top:12px;background:var(--bg0);border:1px solid var(--bdr);border-radius:var(--rs);padding:12px 14px;font-family:var(--m);font-size:.72rem;color:var(--t1);white-space:pre-wrap;overflow-x:auto;line-height:1.6}
+
+/* ══ Explained equations (KaTeX) ══════════════════════════════════════ */
+.eq-card{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--r);padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.eq-name{font-size:.9rem;font-weight:700;color:var(--t0)}
+.eq-formula{background:var(--bg0);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px 14px;overflow-x:auto;text-align:center}
+.eq-formula .prose{font-size:1rem}
+.eq-formula .katex{color:var(--t0);font-size:1.25rem}
+.eq-explain{font-size:.83rem;color:var(--t1);line-height:1.75}
+.eq-terms{display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--bdr);padding-top:12px}
+.eq-term{display:flex;gap:12px;align-items:baseline;font-size:.8rem}
+.eq-term-sym{flex-shrink:0;min-width:44px;color:var(--orange-l)}
+.eq-term-sym .prose{font-size:.9rem}
+.eq-term-sym .katex{color:var(--orange-l)}
+.eq-term-mean{color:var(--t2);line-height:1.5}
+.katex-display{margin:0!important}
