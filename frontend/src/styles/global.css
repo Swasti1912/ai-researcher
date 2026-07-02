@@ -531,3 +531,20 @@ details[open]>summary::before{content:'▾'}
 .ddive-send{background:var(--orange);border:none;border-radius:var(--rs);color:#fff;width:38px;height:38px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s;flex-shrink:0}.ddive-send:hover:not(:disabled){background:var(--orange-l)}.ddive-send:disabled{opacity:.4;cursor:not-allowed}
 
 .arch-title{font-size:.72rem;font-weight:800;font-family:var(--m);color:var(--blue);text-transform:uppercase;letter-spacing:.1em;padding:8px 12px 0;text-align:center}
+
+/* ══ Mermaid concept diagrams ═════════════════════════════════════════ */
+.diagrams-scroll{display:flex;flex-direction:column;gap:18px;padding:20px;overflow-y:auto;height:100%}
+.diagram-card{flex:0 0 auto;background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden}
+.diagram-head{padding:14px 18px;border-bottom:1px solid var(--bdr)}
+.diagram-title{font-size:.9rem;font-weight:700;color:var(--t0);display:flex;align-items:center;gap:8px}
+.diagram-type-badge{font-size:.58rem;font-weight:700;font-family:var(--m);text-transform:uppercase;letter-spacing:.06em;color:var(--blue);background:var(--blue-d);padding:2px 7px;border-radius:5px}
+.diagram-desc{font-size:.78rem;color:var(--t2);margin-top:4px;line-height:1.55}
+.mermaid-diagram{padding:20px 18px;text-align:center;overflow-x:auto}
+.mermaid-diagram svg{max-width:100%;height:auto;display:inline-block}
+.mermaid-diagram .edgeLabel,.mermaid-diagram .nodeLabel{font-family:var(--f)!important}
+.mmd-fallback{padding:18px}
+.mmd-fallback-msg{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.78rem;color:var(--t2)}
+.mmd-fallback-msg svg{color:var(--yellow)}
+.mmd-code-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t2);font-family:var(--m);font-size:.68rem;padding:4px 9px;cursor:pointer;transition:.15s;margin-left:auto}
+.mmd-code-toggle:hover{border-color:var(--orange);color:var(--orange)}
+.mmd-code{margin-top:12px;background:var(--bg0);border:1px solid var(--bdr);border-radius:var(--rs);padding:12px 14px;font-family:var(--m);font-size:.72rem;color:var(--t1);white-space:pre-wrap;overflow-x:auto;line-height:1.6}

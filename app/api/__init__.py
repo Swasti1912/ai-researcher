@@ -149,10 +149,11 @@ class PaperVisualizeReq(BaseModel):
 
 class PaperVisualizeResp(BaseModel):
     session_id: str = ""
-    architecture_diagram: Dict[str, Any] = {}
+    concept_diagrams: List[Dict[str, Any]] = []   # Mermaid diagrams
+    charts: List[Dict[str, Any]] = []
+    architecture_diagram: Dict[str, Any] = {}     # legacy (kept for compat)
     concept_map: Dict[str, Any] = {}
     method_flow: Dict[str, Any] = {}
-    charts: List[Dict[str, Any]] = []
 
 class PaperTeachReq(BaseModel):
     session_id: str

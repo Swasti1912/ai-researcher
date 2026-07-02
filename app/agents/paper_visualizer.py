@@ -16,6 +16,7 @@ Usage::
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from app.agents.base import BaseAgent
@@ -27,6 +28,63 @@ logger = get_logger(__name__)
 
 _TOP_K = 10          # RAG chunks to feed the LLM
 _MAX_CHARS = 8000    # total context chars sent to LLM
+
+
+# Prompt that turns paper content into a set of Mermaid diagrams.
+# We use a delimited text format (NOT JSON) because Mermaid code is full of
+# quotes, brackets and newlines that break JSON escaping.
+_MERMAID_PROMPT = """You are an expert at explaining research papers with clear DIAGRAMS.
+
+Paper excerpts:
+{context}
+
+Create 3 to 4 Mermaid.js diagrams that VISUALLY EXPLAIN this paper's key ideas.
+Use ONLY `flowchart TD`, `flowchart LR`, or `sequenceDiagram` (do NOT use mindmap).
+Pick the most illuminating diagrams for THIS paper, e.g.:
+  - The core method / pipeline as a flowchart (how data flows through the approach)
+  - The model architecture as a flowchart with stages (input to output)
+  - How the key concepts relate to each other as a flowchart
+  - A step-by-step process as a sequenceDiagram (if there are actors/steps over time)
+
+STRICT MERMAID RULES (follow exactly or it will not render):
+1. Each diagram MUST start with one of: flowchart TD, flowchart LR, sequenceDiagram, or mindmap.
+2. Node ids are simple alphanumerics (A, B, n1). Put ALL human text in double-quoted labels:
+   CORRECT:  A["Multi-Head Attention"] --> B["Add and Norm"]
+   WRONG:    A[Multi-Head Attention (8 heads)] --> B
+3. NEVER put parentheses ( ), colons, or slashes inside a label. Use plain words: "8 heads" not "(8 heads)".
+4. Edges: A --> B   or labelled:  A -->|"projects to"| B
+5. Flowcharts: 5 to 10 nodes. You may group stages with subgraphs, but NEVER point an
+   edge directly at a subgraph — connect to a node INSIDE it:
+   CORRECT:
+     B["Embeddings"] --> C["Self-Attention"]
+     subgraph Encoder
+       C["Self-Attention"] --> D["Feed Forward"]
+     end
+   WRONG:  B --> subgraph Encoder
+6. One edge per line. Do NOT chain like A --> B --> C on a single line; write two lines.
+7. sequenceDiagram: use  participant U as User  then  U->>M: message text
+8. No markdown, no HTML, no comments, no mindmap.
+
+OUTPUT FORMAT — return each diagram as a block in EXACTLY this shape, blocks separated by a line
+containing only three equals signs (===). Do NOT wrap anything in JSON or code fences:
+
+TITLE: <short title>
+DESC: <one sentence describing what this diagram shows>
+TYPE: flowchart
+MERMAID:
+flowchart TD
+  A["Input"] --> B["Process"]
+  B --> C["Output"]
+===
+TITLE: <next diagram title>
+DESC: ...
+TYPE: sequence
+MERMAID:
+sequenceDiagram
+  participant U as User
+  U->>S: request
+
+Begin now. Output ONLY the blocks."""
 
 
 class PaperVisualizerAgent(BaseAgent):
@@ -133,50 +191,37 @@ class PaperVisualizerAgent(BaseAgent):
             extra={"session_id": session_id, "chunks": len(chunks), "chars": len(context)},
         )
 
-        # ── Call 1: architecture diagram (focused prompt) ────────────────────
-        arch_prompt = (
+        # ── Call 1: Mermaid concept & workflow diagrams (delimited text) ─────
+        diagrams_raw = await self.call_llm(_MERMAID_PROMPT.format(context=context))
+        concept_diagrams = _parse_diagram_blocks(diagrams_raw)
+
+        # ── Call 2: numeric result charts (JSON) ────────────────────────────
+        charts_prompt = (
             f"Paper excerpts:\n\n{context}\n\n"
-            "Extract ONLY the architecture_diagram as JSON. "
-            "Return ONLY this JSON object, nothing else:\n"
-            '{"architecture_diagram": {"title": "...", "nodes": [...], "edges": [...]}}'
+            "Extract ONLY numeric results as bar/pie charts. If the paper reports "
+            "specific numbers/scores/percentages, return them. If none, return an empty list.\n"
+            "Return ONLY this JSON, nothing else:\n"
+            '{"charts":[{"type":"bar","title":"...","data":[{"name":"...","value":0}]}]}'
         )
-        arch_raw = await self.call_llm(arch_prompt)
-        arch_parsed = safe_json_parse(arch_raw) or {}
+        charts_raw = await self.call_llm(charts_prompt)
+        charts_parsed = safe_json_parse(charts_raw) or {}
 
-        # ── Call 2: concept map + method flow ────────────────────────────────
-        rest_prompt = (
-            f"Paper excerpts:\n\n{context}\n\n"
-            "Return ONLY this compact JSON (max 6 concept nodes, max 5 method steps, "
-            "labels ≤4 words, descriptions ≤8 words, no trailing text):\n"
-            '{"concept_map":{"nodes":[{"id":"c1","label":"...","type":"concept|finding|method|theory","description":"..."}],'
-            '"edges":[{"source":"c1","target":"c2","label":"enables"}]},'
-            '"method_flow":{"nodes":[{"id":"s1","label":"...","description":"..."}],'
-            '"edges":[{"source":"s1","target":"s2"}]},'
-            '"charts":[{"type":"bar","title":"...","data":[{"name":"...","value":0}]}]}'
-        )
-        rest_raw = await self.call_llm(rest_prompt)
-        rest_parsed = safe_json_parse(rest_raw) or {}
-
-        parsed = {**arch_parsed, **rest_parsed}
-
-        if not parsed:
-            logger.warning("Visualizer: failed to parse JSON from both calls, returning empty")
-            return _empty_viz()
-
-        # Validate and fill defaults
+        # Validate and fill defaults (legacy graph fields kept empty for API compat)
         result = {
-            "architecture_diagram": _validate_arch(parsed.get("architecture_diagram", {})),
-            "concept_map": _validate_graph(parsed.get("concept_map", {})),
-            "method_flow": _validate_graph(parsed.get("method_flow", {})),
-            "charts": _validate_charts(parsed.get("charts", [])),
+            "concept_diagrams": concept_diagrams,
+            "charts": _validate_charts(charts_parsed.get("charts", [])),
+            "architecture_diagram": {"title": "", "nodes": [], "edges": []},
+            "concept_map": {"nodes": [], "edges": []},
+            "method_flow": {"nodes": [], "edges": []},
         }
+
+        if not result["concept_diagrams"] and not result["charts"]:
+            logger.warning("Visualizer: no diagrams or charts parsed")
 
         logger.info(
             "Visualization complete",
             extra={
-                "arch": len(result["architecture_diagram"]["nodes"]),
-                "concepts": len(result["concept_map"]["nodes"]),
-                "steps": len(result["method_flow"]["nodes"]),
+                "diagrams": len(result["concept_diagrams"]),
                 "charts": len(result["charts"]),
             },
         )
@@ -190,11 +235,133 @@ class PaperVisualizerAgent(BaseAgent):
 
 def _empty_viz() -> Dict[str, Any]:
     return {
+        "concept_diagrams": [],
+        "charts": [],
         "architecture_diagram": {"title": "", "nodes": [], "edges": []},
         "concept_map": {"nodes": [], "edges": []},
         "method_flow": {"nodes": [], "edges": []},
-        "charts": [],
     }
+
+
+# Diagram types we accept from the model
+_DIAGRAM_TYPES = {"flowchart", "sequence", "mindmap", "graph", "architecture", "workflow"}
+
+
+def _parse_diagram_blocks(raw: str) -> List[Dict[str, Any]]:
+    """
+    Parse the delimited diagram format:
+
+        TITLE: ...
+        DESC: ...
+        TYPE: flowchart
+        MERMAID:
+        <mermaid code ...>
+        ===
+        TITLE: ...
+
+    Robust to quotes/newlines in the Mermaid code (unlike JSON).
+    """
+    if not raw or not raw.strip():
+        return []
+    text = raw.strip()
+    # Strip any stray outer code fences
+    text = re.sub(r"^```(?:\w+)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+
+    blocks = re.split(r"\n\s*={3,}\s*\n", text)
+    out: List[Dict[str, Any]] = []
+    for block in blocks:
+        if "MERMAID:" not in block.upper():
+            continue
+        title, desc, dtype = "Diagram", "", "flowchart"
+        # Split header (TITLE/DESC/TYPE) from the mermaid code
+        parts = re.split(r"MERMAID:\s*\n?", block, maxsplit=1, flags=re.IGNORECASE)
+        head = parts[0]
+        code = parts[1] if len(parts) > 1 else ""
+        for line in head.splitlines():
+            m = re.match(r"\s*(TITLE|DESC|TYPE)\s*:\s*(.+)", line, re.IGNORECASE)
+            if not m:
+                continue
+            key, val = m.group(1).upper(), m.group(2).strip()
+            if key == "TITLE":
+                title = val[:120]
+            elif key == "DESC":
+                desc = val[:300]
+            elif key == "TYPE":
+                v = val.lower().split()[0] if val else "flowchart"
+                dtype = v if v in _DIAGRAM_TYPES else "flowchart"
+        code = _sanitize_mermaid(code)
+        if code:
+            out.append({"title": title, "description": desc, "type": dtype, "mermaid": code})
+    return out[:6]
+
+
+def _sanitize_mermaid(code: str) -> str:
+    """
+    Light cleanup of common LLM Mermaid mistakes so it parses client-side:
+      - strip ``` fences
+      - normalise escaped newlines
+      - ensure a valid diagram header exists
+    """
+    import re
+    s = code.strip()
+    # Strip markdown code fences
+    s = re.sub(r"^```(?:mermaid)?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s).strip()
+    # Convert any literal "\n" sequences into real newlines
+    if "\\n" in s and "\n" not in s:
+        s = s.replace("\\n", "\n")
+    # Must start with a recognised diagram declaration
+    first = s.lstrip().split("\n", 1)[0].strip().lower()
+    valid_starts = ("flowchart", "graph", "sequencediagram", "mindmap",
+                    "classdiagram", "statediagram", "erdiagram", "journey")
+    if not first.startswith(valid_starts):
+        return ""
+
+    # Fix the common LLM mistake: `X --> subgraph Name` (invalid). Convert to a
+    # proper `subgraph Name` and re-attach the edge to the first inner node.
+    if "--> subgraph" in s or "-->subgraph" in s:
+        s = _fix_subgraph_edges(s)
+    # Split chained edges `A --> B --> C` into separate statements (more robust).
+    s = _split_chained_edges(s)
+    return s
+
+
+def _split_chained_edges(code: str) -> str:
+    out: List[str] = []
+    for line in code.split("\n"):
+        # Only split plain chained edges (avoid labelled edges that contain '|')
+        if line.count("-->") >= 2 and "|" not in line:
+            indent = line[: len(line) - len(line.lstrip())]
+            segs = [seg.strip() for seg in line.split("-->")]
+            for i in range(len(segs) - 1):
+                if segs[i] and segs[i + 1]:
+                    out.append(f"{indent}{segs[i]} --> {segs[i + 1]}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _fix_subgraph_edges(code: str) -> str:
+    lines = code.split("\n")
+    out: List[str] = []
+    pending_src: Optional[str] = None
+    for line in lines:
+        m = re.match(r"^(\s*)(\w+)\s*-->\s*subgraph\s+(.+)$", line)
+        if m:
+            indent, src, name = m.groups()
+            pending_src = src
+            out.append(f"{indent}subgraph {name}")
+            continue
+        if pending_src:
+            nm = re.match(r"^\s*(\w+)", line)
+            if nm:
+                out.append(line)
+                out.append(f"{pending_src} --> {nm.group(1)}")
+                pending_src = None
+                continue
+        out.append(line)
+    return "\n".join(out)
 
 
 def _validate_graph(g: Any) -> Dict[str, Any]:

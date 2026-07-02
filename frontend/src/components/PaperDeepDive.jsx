@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { fetchPaperFromUrl, summarizePaper, askPaper, visualizePaper } from '../services/api';
-import PaperVisualization from './PaperVisualization';
 import ConceptCards from './ConceptCards';
+
+const PaperVisualization = lazy(() => import('./PaperVisualization'));
 
 const PROC_STEPS = [
   { key: 'fetch',   label: 'Fetching paper',                       sub: 'Downloading from source…' },
@@ -293,7 +294,9 @@ export default function PaperDeepDive({ paper, onClose }) {
                   </div>
                 )}
                 {!vizLoading && vizData && (
-                  <PaperVisualization data={vizData} />
+                  <Suspense fallback={<div style={{ padding: 30, textAlign: 'center', color: 'var(--t2)' }}><span className="spin" /> Loading…</div>}>
+                    <PaperVisualization data={vizData} />
+                  </Suspense>
                 )}
               </div>
             )}

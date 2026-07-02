@@ -1,10 +1,17 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, lazy, Suspense } from 'react';
 import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper } from '../services/api';
-import PaperVisualization from './PaperVisualization';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import Markdown from './Markdown';
+
+// Lazy-loaded: pulls in Mermaid + Recharts only when a visualization is opened.
+const PaperVisualization = lazy(() => import('./PaperVisualization'));
+const VizFallback = () => (
+  <div className="viz-panel" style={{ padding: 40, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, color: 'var(--t2)' }}>
+    <span className="spin" /> Loading visualizations…
+  </div>
+);
 
 // Processing steps shown while a paper is being ingested
 const PROC_STEPS = [
@@ -447,7 +454,9 @@ export default function PaperMode() {
 
           {/* ── Visualization panel ── */}
           {vizData && (
-            <PaperVisualization data={vizData} onClose={() => setVizData(null)} />
+            <Suspense fallback={<VizFallback />}>
+              <PaperVisualization data={vizData} onClose={() => setVizData(null)} />
+            </Suspense>
           )}
 
           {/* ── Q&A chat ── */}
