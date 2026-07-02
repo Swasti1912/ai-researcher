@@ -1,8 +1,10 @@
 import React, { useState, useRef } from 'react';
+import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper } from '../services/api';
 import PaperVisualization from './PaperVisualization';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
+import Markdown from './Markdown';
 
 // Processing steps shown while a paper is being ingested
 const PROC_STEPS = [
@@ -204,7 +206,7 @@ export default function PaperMode() {
             style={{ display: 'none' }}
             onChange={e => handleFile(e.target.files[0])}
           />
-          <div className="paper-drop-icon">📄</div>
+          <UploadCloud className="paper-drop-icon" />
           <div className="paper-drop-title">Drop a paper here</div>
           <div className="paper-drop-sub">PDF, TXT, or Markdown · Click or drag</div>
           {uploadErr && <div className="paper-err">{uploadErr}</div>}
@@ -215,7 +217,7 @@ export default function PaperMode() {
       {phase === 'upload' && pendingSummarize && (
         <div className="paper-drop" style={{ marginTop: 12, cursor: 'default' }}
           onClick={e => e.stopPropagation()}>
-          <div className="paper-drop-icon">⚠️</div>
+          <AlertTriangle className="paper-drop-icon" style={{ color: 'var(--yellow)' }} />
           <div className="paper-drop-title">Summarization failed</div>
           <div className="paper-drop-sub">
             Your paper was uploaded successfully but the AI summary timed out.
@@ -231,10 +233,10 @@ export default function PaperMode() {
                 runSummarize(pendingSummarize.sessionId, pendingSummarize.filename);
               }}
             >
-              ↻ Retry summarization
+              <RotateCcw size={14} /> Retry summarization
             </button>
             <button className="btn btn-g" onClick={resetToUpload}>
-              ✕ Start over
+              Start over
             </button>
           </div>
         </div>
@@ -244,7 +246,7 @@ export default function PaperMode() {
       {phase === 'processing' && (
         <div className="paper-processing">
           <div className="paper-proc-header">
-            <div className="paper-proc-icon">📄</div>
+            <FileText className="paper-proc-icon" />
             <div>
               <div className="paper-proc-name">{filename}</div>
               <div className="paper-proc-sub">Processing your paper…</div>
@@ -288,7 +290,7 @@ export default function PaperMode() {
           {/* ── Summary panel ── */}
           <div className="paper-summary">
             <div className="paper-summary-header">
-              <div className="dot d-bl">📄</div>
+              <div className="dot d-bl"><FileText size={16} /></div>
               <div>
                 <div className="paper-summary-title">{summary.title || filename}</div>
                 {summary.authors && <div className="paper-summary-authors">{summary.authors}</div>}
@@ -383,7 +385,7 @@ export default function PaperMode() {
           {!teachLesson && (
             <div className="teach-card">
               <div className="teach-card-left">
-                <div className="teach-card-icon">🎓</div>
+                <GraduationCap className="teach-card-icon" />
                 <div>
                   <div className="teach-card-title">Teach me this paper</div>
                   <div className="teach-card-sub">
@@ -398,7 +400,7 @@ export default function PaperMode() {
               >
                 {teachLoading
                   ? <><span className="spin" /> Preparing lesson…</>
-                  : '🎓 Teach Me'}
+                  : <><GraduationCap size={15} /> Teach Me</>}
               </button>
               {teachErr && <div className="paper-err" style={{ width: '100%', marginTop: 6 }}>{teachErr}</div>}
             </div>
@@ -422,7 +424,7 @@ export default function PaperMode() {
           {!vizData && (
             <div className="viz-card">
               <div className="viz-card-left">
-                <div className="viz-card-icon">🗺️</div>
+                <Map className="viz-card-icon" />
                 <div>
                   <div className="viz-card-title">Visualize this paper</div>
                   <div className="viz-card-sub">
@@ -487,7 +489,7 @@ export default function PaperMode() {
                 disabled={asking}
               />
               <button className="btn btn-p" onClick={handleAsk} disabled={!question.trim() || asking}>
-                {asking ? <span className="spin" /> : '↑'}
+                {asking ? <span className="spin" /> : <ArrowUp size={16} />}
               </button>
             </div>
           </div>
@@ -514,7 +516,9 @@ function ChatMessage({ msg, onFollowUp, disabled }) {
   return (
     <div className={`chat-msg ${isUser ? 'chat-msg-user' : 'chat-msg-assistant'}`}>
       <div className="chat-bubble">
-        <div className="chat-content">{msg.content}</div>
+        {isUser
+          ? <div className="chat-content">{msg.content}</div>
+          : <div className="chat-content"><Markdown>{msg.content}</Markdown></div>}
 
         {!isUser && msg.evidence?.length > 0 && (
           <details className="chat-evidence">

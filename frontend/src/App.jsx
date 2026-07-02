@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Sparkles, AlertCircle } from 'lucide-react';
 import Header from './components/Header';
 import QueryInput from './components/QueryInput';
-import Pipeline from './components/Pipeline';
 import Results from './components/Results';
 import Sidebar from './components/Sidebar';
 import PaperMode from './components/PaperMode';
@@ -9,25 +9,30 @@ import { submitResearch, uploadPaper } from './services/api';
 
 const STEPS = [
   { key: 'orchestrator', label: 'Orchestrator' },
-  { key: 'refiner',      label: 'Refiner Agent' },
-  { key: 'intent',       label: 'Intent Agent' },
-  { key: 'decomposer',   label: 'Decomposer Agent' },
-  { key: 'aggregator',   label: 'Aggregator Agent' },
-  { key: 'reasoning',    label: 'Reasoning Agent' },
-  { key: 'evaluator',    label: 'Evaluator Agent' },
+  { key: 'refiner',      label: 'Refiner' },
+  { key: 'intent',       label: 'Intent' },
+  { key: 'decomposer',   label: 'Decomposer' },
+  { key: 'aggregator',   label: 'Aggregator' },
+  { key: 'reasoning',    label: 'Reasoning' },
+  { key: 'evaluator',    label: 'Evaluator' },
+];
+
+const EXAMPLES = [
+  'What is retrieval-augmented generation?',
+  'How does the Transformer attention mechanism work?',
+  'Latest advances in protein structure prediction',
+  'Compare diffusion models and GANs',
 ];
 
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
-  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
-
-  const [mode, setMode]           = useState('research'); // 'research' | 'paper'
+  const [mode, setMode]           = useState('research');
   const [query, setQuery]         = useState('');
   const [paper, setPaper]         = useState(null);
   const [paperInfo, setPaperInfo] = useState(null);
@@ -54,13 +59,16 @@ export default function App() {
     setPaper(file);
     try { setPaperInfo(await uploadPaper(file)); } catch { setPaperInfo({ filename: file.name, text_preview: '' }); }
   };
+  const clearPaper = () => { setPaper(null); setPaperInfo(null); };
 
-  const handleSubmit = async () => {
-    if (!query.trim() || loading) return;
+  const runQuery = async (q) => {
+    const question = (q ?? query).trim();
+    if (!question || loading) return;
+    if (q) setQuery(q);
     setLoading(true); setError(null); setResult(null);
     setActive(0); setDone([]); animate();
     try {
-      const r = await submitResearch(query, paperInfo?.text_preview || null, paperInfo?.filename || null);
+      const r = await submitResearch(question, paperInfo?.text_preview || null, paperInfo?.filename || null);
       setResult(r); setDone(STEPS.map(s => s.key)); setActive(STEPS.length);
     } catch (e) {
       setError(e.response?.data?.message || e.response?.data?.detail || e.message);
@@ -68,47 +76,73 @@ export default function App() {
     } finally { clearTimers(); setLoading(false); }
   };
 
+  const showHero = mode === 'research' && !result && !loading && !error;
+
   return (
     <div className="app">
-      <Header theme={theme} onThemeToggle={toggleTheme} />
-
-      {/* Mode toggle */}
-      <div className="mode-bar">
-        <button
-          className={`mode-btn ${mode === 'research' ? 'mode-btn-on' : ''}`}
-          onClick={() => setMode('research')}
-        >
-          🔬 Research Mode
-        </button>
-        <button
-          className={`mode-btn ${mode === 'paper' ? 'mode-btn-on' : ''}`}
-          onClick={() => setMode('paper')}
-        >
-          📄 Paper Q&amp;A
-        </button>
-      </div>
+      <Header mode={mode} onModeChange={setMode} theme={theme} onThemeToggle={toggleTheme} />
 
       {mode === 'research' ? (
-        <div className="body">
+        <div className={`body ${!result ? 'body-full' : ''}`}>
           <main className="main">
-            <QueryInput query={query} setQuery={setQuery} onSubmit={handleSubmit}
-              onUpload={handleUpload} paper={paper} loading={loading} />
-            {error && (
-              <div className="card" style={{ borderColor: 'var(--red)' }}>
-                <div className="card-h"><div className="dot d-rd">✕</div><h4>Error</h4></div>
-                <div className="card-b">{error}</div>
-              </div>
-            )}
-            {result && <Results result={result} />}
+            <div className="main-inner">
+              {showHero && (
+                <div className="hero">
+                  <span className="hero-badge"><Sparkles size={12} style={{ display: 'inline', verticalAlign: '-1px' }} /> Multi-agent research</span>
+                  <div className="hero-title">Research anything, deeply.</div>
+                  <div className="hero-sub">
+                    Ask a question and a pipeline of agents searches arXiv, Semantic Scholar &amp; more —
+                    then synthesizes a cited answer.
+                  </div>
+                </div>
+              )}
+
+              <QueryInput
+                query={query} setQuery={setQuery} onSubmit={runQuery}
+                onUpload={handleUpload} onClearPaper={clearPaper} paper={paper} loading={loading}
+              />
+
+              {showHero && (
+                <div className="examples">
+                  {EXAMPLES.map((ex, i) => (
+                    <button key={i} className="example-chip" onClick={() => runQuery(ex)}>{ex}</button>
+                  ))}
+                </div>
+              )}
+
+              {error && (
+                <div className="err-card">
+                  <AlertCircle size={20} color="var(--red)" style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--t0)', fontSize: '.86rem', marginBottom: 2 }}>Something went wrong</div>
+                    <div style={{ fontSize: '.8rem', color: 'var(--t2)' }}>{error}</div>
+                  </div>
+                </div>
+              )}
+
+              {loading && !result && (
+                <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center', padding: 28 }}>
+                  <span className="spin" />
+                  <span style={{ color: 'var(--t2)', fontSize: '.85rem' }}>Running the research pipeline…</span>
+                </div>
+              )}
+
+              {result && <Results result={result} />}
+            </div>
           </main>
-          <aside className="side">
-            <Sidebar steps={STEPS} active={active} done={done} loading={loading} result={result} />
-          </aside>
+
+          {result && (
+            <aside className="side">
+              <Sidebar steps={STEPS} active={active} done={done} loading={loading} result={result} />
+            </aside>
+          )}
         </div>
       ) : (
         <div className="body body-full">
           <main className="main">
-            <PaperMode />
+            <div className="main-inner">
+              <PaperMode />
+            </div>
           </main>
         </div>
       )}
