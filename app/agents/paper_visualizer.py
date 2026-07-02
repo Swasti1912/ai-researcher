@@ -33,37 +33,54 @@ _MAX_CHARS = 8000    # total context chars sent to LLM
 # Prompt that turns paper content into a set of Mermaid diagrams.
 # We use a delimited text format (NOT JSON) because Mermaid code is full of
 # quotes, brackets and newlines that break JSON escaping.
-_MERMAID_PROMPT = """You are an expert at explaining research papers with clear DIAGRAMS.
+_MERMAID_PROMPT = """You are an expert at explaining research papers from ANY field with clear DIAGRAMS.
 
 Paper excerpts:
 {context}
 
 Create 3 to 4 Mermaid.js diagrams that VISUALLY EXPLAIN this paper's key ideas.
-Use ONLY `flowchart TD`, `flowchart LR`, or `sequenceDiagram` (do NOT use mindmap).
-Pick the most illuminating diagrams for THIS paper, e.g.:
-  - The core method / pipeline as a flowchart (how data flows through the approach)
-  - The model architecture as a flowchart with stages (input to output)
-  - How the key concepts relate to each other as a flowchart
-  - A step-by-step process as a sequenceDiagram (if there are actors/steps over time)
+First infer the paper's field and what it is really about, then pick the diagram forms that
+best explain THIS paper. Examples across domains (adapt to the actual paper):
+  - Machine learning / CS: model architecture or data pipeline as a flowchart; component interaction as sequenceDiagram.
+  - Pharmacology: drug mechanism of action as a flowchart (Drug binds Receptor triggers Pathway leads to Effect).
+  - Medicine / clinical: patient treatment or trial-enrollment pathway as a flowchart; study schedule as a timeline.
+  - Economics / policy: a causal / influence model as a flowchart (Policy affects Rates affects Investment affects Output).
+  - Biology / chemistry: a process, reaction, or pathway as a flowchart.
+  - Any concept-heavy paper: how the key concepts/factors relate as a flowchart, or a concept hierarchy as a mindmap.
+
+Choose the RIGHT type per diagram:
+  - flowchart TD or flowchart LR  -> processes, pipelines, mechanisms, causal/influence models, relationships (USE THIS MOST).
+  - sequenceDiagram               -> interactions or steps between actors over time.
+  - timeline                      -> chronological phases (study timeline, historical periods, trial weeks).
+  - mindmap                       -> a hierarchy of concepts/factors branching from one central idea.
 
 STRICT MERMAID RULES (follow exactly or it will not render):
-1. Each diagram MUST start with one of: flowchart TD, flowchart LR, sequenceDiagram, or mindmap.
-2. Node ids are simple alphanumerics (A, B, n1). Put ALL human text in double-quoted labels:
-   CORRECT:  A["Multi-Head Attention"] --> B["Add and Norm"]
-   WRONG:    A[Multi-Head Attention (8 heads)] --> B
-3. NEVER put parentheses ( ), colons, or slashes inside a label. Use plain words: "8 heads" not "(8 heads)".
-4. Edges: A --> B   or labelled:  A -->|"projects to"| B
-5. Flowcharts: 5 to 10 nodes. You may group stages with subgraphs, but NEVER point an
-   edge directly at a subgraph — connect to a node INSIDE it:
-   CORRECT:
-     B["Embeddings"] --> C["Self-Attention"]
-     subgraph Encoder
-       C["Self-Attention"] --> D["Feed Forward"]
-     end
-   WRONG:  B --> subgraph Encoder
-6. One edge per line. Do NOT chain like A --> B --> C on a single line; write two lines.
-7. sequenceDiagram: use  participant U as User  then  U->>M: message text
-8. No markdown, no HTML, no comments, no mindmap.
+A. Each diagram starts with one of: flowchart TD, flowchart LR, sequenceDiagram, timeline, mindmap.
+B. FLOWCHART:
+   - Node ids are simple alphanumerics (A, B, n1). Put ALL human text in double-quoted labels:
+       CORRECT:  A["Beta Blocker"] --> B["Lowers Heart Rate"]
+       WRONG:    A[Beta Blocker (lowers HR)] --> B
+   - NEVER put parentheses ( ), colons, or slashes inside a label. Use plain words.
+   - One edge per line. Do NOT chain A --> B --> C on one line; write separate lines.
+   - Optional labels on edges:  A -->|"increases"| B
+   - You may group with subgraphs, but NEVER point an edge at a subgraph; connect to a node inside it.
+   - 5 to 10 nodes.
+C. SEQUENCEDIAGRAM: `participant P as Patient` then `P->>D: reports symptom` (plain text after the colon).
+D. TIMELINE: after `timeline`, optionally `title Some Title`, then rows `Period : Event : Event`. Example:
+       timeline
+         title Trial Schedule
+         Week 0 : Screening : Enrollment
+         Week 4 : First dose
+         Week 12 : Primary endpoint
+E. MINDMAP: indentation ONLY, NO arrows. Root then indented branches. Example:
+       mindmap
+         root("GDP Growth")
+           Consumption
+             Wages
+             Confidence
+           Investment
+             Interest Rates
+F. No markdown, no HTML, no comments.
 
 OUTPUT FORMAT — return each diagram as a block in EXACTLY this shape, blocks separated by a line
 containing only three equals signs (===). Do NOT wrap anything in JSON or code fences:
@@ -73,16 +90,17 @@ DESC: <one sentence describing what this diagram shows>
 TYPE: flowchart
 MERMAID:
 flowchart TD
-  A["Input"] --> B["Process"]
-  B --> C["Output"]
+  A["Cause"] --> B["Effect"]
+  B --> C["Outcome"]
 ===
 TITLE: <next diagram title>
 DESC: ...
-TYPE: sequence
+TYPE: timeline
 MERMAID:
-sequenceDiagram
-  participant U as User
-  U->>S: request
+timeline
+  title Example
+  Phase 1 : Step A
+  Phase 2 : Step B
 
 Begin now. Output ONLY the blocks."""
 
@@ -167,12 +185,12 @@ class PaperVisualizerAgent(BaseAgent):
         """
         kb = get_kb()
 
-        # Pull broad coverage chunks — use multiple queries to get different parts
+        # Pull broad coverage chunks with domain-agnostic queries (works for any field)
         queries = [
-            "model architecture components layers encoder decoder attention embedding",
-            "main concepts contributions key ideas",
-            "methodology research design procedure steps",
-            "results findings numbers statistics conclusions",
+            "main idea core contribution key concepts approach",
+            "method process procedure mechanism how it works steps",
+            "system model framework structure components relationships factors",
+            "results findings outcomes effects numbers statistics conclusions",
         ]
         seen, chunks = set(), []
         for q in queries:
@@ -244,7 +262,8 @@ def _empty_viz() -> Dict[str, Any]:
 
 
 # Diagram types we accept from the model
-_DIAGRAM_TYPES = {"flowchart", "sequence", "mindmap", "graph", "architecture", "workflow"}
+_DIAGRAM_TYPES = {"flowchart", "sequence", "mindmap", "timeline", "graph",
+                  "architecture", "workflow", "state", "er"}
 
 
 def _parse_diagram_blocks(raw: str) -> List[Dict[str, Any]]:
@@ -313,18 +332,37 @@ def _sanitize_mermaid(code: str) -> str:
         s = s.replace("\\n", "\n")
     # Must start with a recognised diagram declaration
     first = s.lstrip().split("\n", 1)[0].strip().lower()
-    valid_starts = ("flowchart", "graph", "sequencediagram", "mindmap",
+    valid_starts = ("flowchart", "graph", "sequencediagram", "mindmap", "timeline",
                     "classdiagram", "statediagram", "erdiagram", "journey")
     if not first.startswith(valid_starts):
         return ""
 
-    # Fix the common LLM mistake: `X --> subgraph Name` (invalid). Convert to a
-    # proper `subgraph Name` and re-attach the edge to the first inner node.
+    # Mindmaps use indentation only — strip any arrows/edges the model wrongly added.
+    if first.startswith("mindmap"):
+        return _fix_mindmap(s)
+
+    # Flowchart-family fixes:
+    # Fix `X --> subgraph Name` (invalid) -> proper subgraph + re-attached edge.
     if "--> subgraph" in s or "-->subgraph" in s:
         s = _fix_subgraph_edges(s)
     # Split chained edges `A --> B --> C` into separate statements (more robust).
     s = _split_chained_edges(s)
     return s
+
+
+def _fix_mindmap(code: str) -> str:
+    """Mindmaps are indentation-based. Remove arrows/pipes the LLM sometimes adds
+    and drop empty lines so the parser doesn't choke."""
+    out: List[str] = []
+    for line in code.split("\n"):
+        if not line.strip():
+            continue
+        # Turn `  --> Foo` or `  A --> B` style into a plain indented node label
+        cleaned = re.sub(r"-->\s*\|[^|]*\|", " ", line)   # labelled edges
+        cleaned = cleaned.replace("-->", " ")
+        cleaned = re.sub(r"[|>]", " ", cleaned).rstrip()
+        out.append(cleaned)
+    return "\n".join(out)
 
 
 def _split_chained_edges(code: str) -> str:
