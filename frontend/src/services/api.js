@@ -47,3 +47,16 @@ export const getPaperFigures = (sessionId) =>
 
 export const paperFigureUrl = (sessionId, figId) => `/api/paper/figure/${sessionId}/${figId}`;
 export const paperPdfUrl = (sessionId) => `/api/paper/pdf/${sessionId}`;
+
+// Library + persistence (P2)
+export const getLibrary = () => http.get('/paper/library').then(r => r.data);
+export const getPaperMeta = (sessionId) => http.get(`/paper/${sessionId}`).then(r => r.data);
+export const getPaperChat = (sessionId) => http.get(`/paper/${sessionId}/chat`).then(r => r.data);
+
+// Highlights
+export const getHighlights = (sessionId) => http.get(`/paper/${sessionId}/highlights`).then(r => r.data);
+export const createHighlight = (sessionId, body) =>
+  http.post(`/paper/${sessionId}/highlights`, body).then(r => r.data);
+export const updateHighlightNote = (id, note) =>
+  http.patch(`/paper/highlights/${id}`, { note }).then(r => r.data);
+export const deleteHighlight = (id) => http.delete(`/paper/highlights/${id}`).then(r => r.data);

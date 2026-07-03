@@ -48,7 +48,13 @@ class Settings(BaseSettings):
     qdrant_url: str = ":memory:"
     qdrant_collection: str = "paper_chunks"
     embedding_model: str = "all-MiniLM-L6-v2"   # 384-dim, ~80 MB, runs locally
-    session_max_age_hours: float = 2.0           # auto-clean sessions older than this
+    session_max_age_hours: float = 2.0           # in-memory TTL (persisted papers are never auto-deleted)
+
+    # Persistent storage (P2). When qdrant_url == ":memory:", vectors are stored
+    # on disk under qdrant_path so they survive a restart. NOTE: on-disk Qdrant
+    # takes an exclusive single-process lock — run one worker, no --reload.
+    data_dir: str = "./data"
+    qdrant_path: str = ""                        # defaults to {data_dir}/qdrant when empty
 
     @property
     def cors_list(self) -> List[str]:

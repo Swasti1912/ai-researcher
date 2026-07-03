@@ -1,10 +1,13 @@
 import React, { useState, useRef, lazy, Suspense } from 'react';
 import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft } from 'lucide-react';
-import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper } from '../services/api';
+import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper,
+  getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
 import SectionBreakdown from './SectionBreakdown';
+import Library from './Library';
+import HighlightsPanel from './HighlightsPanel';
 import Markdown from './Markdown';
 
 // Lazy-loaded: pulls in Mermaid + Recharts only when a visualization is opened.
@@ -56,12 +59,59 @@ export default function PaperMode() {
   const [paperFile, setPaperFile] = useState(null);   // browser File for client-side PDF render
   const [hasPdf, setHasPdf]       = useState(false);  // true when a renderable PDF exists
   const [mobileView, setMobileView] = useState('ai'); // 'pdf' | 'ai' (narrow screens)
+  const [highlights, setHighlights] = useState([]);   // persisted PDF highlights/notes
+  const [libraryKey, setLibraryKey] = useState(0);    // bump to refresh the library list
   const fileRef = useRef();
   const chatRef = useRef();
   const pdfPaneRef = useRef();
 
   const locateInPdf = (text, page) => pdfPaneRef.current?.scrollToText?.(text, page ? { page } : {});
   const locatePage = (page) => pdfPaneRef.current?.scrollToPage?.(page);
+
+  // ── Highlights (persisted) ────────────────────────────────────────
+  const handleCreateHighlight = async ({ page, rects, quote, color = 'yellow', note = '' }) => {
+    try {
+      const h = await createHighlight(sessionId, { page, rects, quote, color, note });
+      setHighlights(prev => [...prev, h]);
+    } catch { /* ignore */ }
+  };
+  const handleUpdateNote = async (id, note) => {
+    try {
+      const h = await updateHighlightNote(id, note);
+      setHighlights(prev => prev.map(x => x.id === id ? h : x));
+    } catch { /* ignore */ }
+  };
+  const handleDeleteHighlight = async (id) => {
+    setHighlights(prev => prev.filter(x => x.id !== id));
+    try { await deleteHighlight(id); } catch { /* ignore */ }
+  };
+
+  // ── Reopen a saved paper from the library ─────────────────────────
+  const reopenPaper = async (sid) => {
+    setPhase('processing');
+    setProcStep('summary'); setDoneSteps(['parse', 'embed']);
+    setPaperFile(null); setMessages([]); setHighlights([]); setVizData(null); setTeachLesson(null);
+    try {
+      const meta = await getPaperMeta(sid);
+      setSessionId(sid);
+      setFilename(meta.filename || meta.title || 'paper');
+      setHasPdf(!!meta.has_pdf && meta.page_count > 0);
+      setSummary(meta.summary || null);
+      const [chat, hl] = await Promise.all([
+        getPaperChat(sid).catch(() => ({ messages: [] })),
+        getHighlights(sid).catch(() => ({ highlights: [] })),
+      ]);
+      setMessages((chat.messages || []).map(m => ({
+        role: m.role, content: m.content, evidence: m.evidence || [],
+      })));
+      setHighlights(hl.highlights || []);
+      if (!meta.summary) { await runSummarize(sid, meta.filename); }
+      else { setDoneSteps(['parse', 'embed', 'summary', 'ready']); setProcStep(null); setPhase('ready'); }
+    } catch (e) {
+      setUploadErr('Could not reopen this paper.');
+      setPhase('upload');
+    }
+  };
 
   // ── Upload + summarize ────────────────────────────────────────────
   const handleFile = async (file) => {
@@ -131,8 +181,11 @@ export default function PaperMode() {
   };
 
   const resetToUpload = () => {
-    if (sessionId) deleteSession(sessionId).catch(() => {});
+    // "New paper" keeps the current paper in the library (persisted).
+    // Deletion is explicit via the library trash button.
     setPhase('upload');
+    setLibraryKey(k => k + 1);   // refresh library so the just-saved paper shows
+    setHighlights([]);
     setSummary(null);
     setSessionId(null);
     setMessages([]);
@@ -241,6 +294,11 @@ export default function PaperMode() {
         </div>
       )}
 
+      {/* ── Library of saved papers ── */}
+      {phase === 'upload' && !pendingSummarize && (
+        <Library onOpen={reopenPaper} refreshKey={libraryKey} />
+      )}
+
       {/* ── Summarize-retry panel (shown when upload succeeded but summarize failed) ── */}
       {phase === 'upload' && pendingSummarize && (
         <div className="paper-drop" style={{ marginTop: 12, cursor: 'default' }}
@@ -330,7 +388,13 @@ export default function PaperMode() {
             {hasPdf && (
               <div className="paper-split-pdf">
                 <Suspense fallback={<PdfFallback />}>
-                  <PdfPane apiRef={pdfPaneRef} file={paperFile} sessionId={sessionId} />
+                  <PdfPane
+                    apiRef={pdfPaneRef} file={paperFile} sessionId={sessionId}
+                    highlights={highlights}
+                    onCreateHighlight={handleCreateHighlight}
+                    onUpdateNote={handleUpdateNote}
+                    onDeleteHighlight={handleDeleteHighlight}
+                  />
                 </Suspense>
               </div>
             )}
@@ -432,6 +496,15 @@ export default function PaperMode() {
 
           {/* ── Figures & tables (P1) ── */}
           <FiguresStrip sessionId={sessionId} onLocate={locatePage} />
+
+          {/* ── Highlights & notes (P2) ── */}
+          {hasPdf && (
+            <HighlightsPanel
+              highlights={highlights}
+              onOpen={(id) => pdfPaneRef.current?.scrollToHighlight?.(id)}
+              onDelete={handleDeleteHighlight}
+            />
+          )}
 
           {/* ── Teach Me ── */}
           {!teachLesson && (

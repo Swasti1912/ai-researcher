@@ -54,11 +54,20 @@ _collection_ready = False
 def _get_client():
     global _qdrant_client, _collection_ready
     if _qdrant_client is None:
+        import os
         from qdrant_client import QdrantClient
         from app.config import get_settings
         s = get_settings()
-        _log.info("Connecting to Qdrant", extra={"url": s.qdrant_url})
-        _qdrant_client = QdrantClient(location=s.qdrant_url)
+        if s.qdrant_url == ":memory:":
+            # On-disk local Qdrant so vectors survive restart (P2). NOTE: this
+            # takes an exclusive single-process lock — run one worker, no --reload.
+            path = s.qdrant_path or os.path.join(s.data_dir, "qdrant")
+            os.makedirs(path, exist_ok=True)
+            _log.info("Connecting to Qdrant (on-disk)", extra={"path": path})
+            _qdrant_client = QdrantClient(path=path)
+        else:
+            _log.info("Connecting to Qdrant", extra={"url": s.qdrant_url})
+            _qdrant_client = QdrantClient(location=s.qdrant_url)
         _ensure_collection(_qdrant_client, s.qdrant_collection)
         _collection_ready = True
     return _qdrant_client
@@ -315,32 +324,94 @@ class KnowledgeBase:
             ),
         )
 
+        # Also remove from persistent storage (files + SQLite rows).
+        try:
+            from app import storage
+            storage.delete_paper(session_id)
+        except Exception as exc:
+            _log.warning("storage.delete_paper failed", extra={"session_id": session_id, "err": str(exc)})
+
         chunk_count = meta.get("chunk_count", 0)
         _log.info("Session deleted", extra={"session_id": session_id, "chunks": chunk_count})
         return chunk_count
 
     def cleanup_old_sessions(self) -> int:
         """
-        Delete all sessions older than ``session_max_age_hours``.
+        Evict stale sessions older than ``session_max_age_hours``.
 
-        Called on startup and by the DELETE /paper/session/cleanup endpoint.
-        Returns number of sessions cleaned.
+        Persistence is the source of truth now: **persisted papers are never
+        auto-deleted** (only ephemeral, non-persisted sessions are). To remove a
+        persisted paper the user must explicitly delete it.
         """
         from app.config import get_settings
         max_age = get_settings().session_max_age_hours
         cutoff  = time.time() - max_age * 3600
-        stale   = [sid for sid, m in _sessions.items() if m["created_at"] < cutoff]
+        stale   = [sid for sid, m in _sessions.items()
+                   if m.get("created_at", 0) < cutoff and not m.get("persisted")]
         for sid in stale:
             self.delete_session(sid)
         if stale:
-            _log.info("Cleaned stale sessions", extra={"count": len(stale)})
+            _log.info("Cleaned stale (non-persisted) sessions", extra={"count": len(stale)})
         return len(stale)
+
+    def load_index(self) -> int:
+        """
+        Rehydrate the in-memory session index from persistent storage at startup.
+
+        Loads only LIGHTWEIGHT metadata (no PDF/PNG bytes, no full text) so past
+        papers are known and searchable; heavy blobs load lazily from disk.
+        """
+        try:
+            from app import storage
+            papers = storage.list_papers()
+        except Exception as exc:
+            _log.warning("load_index failed", extra={"err": str(exc)})
+            return 0
+        loaded = 0
+        for p in papers:
+            sid = p["session_id"]
+            if sid in _sessions:
+                continue
+            figs = storage.list_figures(sid)  # metadata only (no png bytes)
+            row = storage.get_paper(sid)
+            _sessions[sid] = {
+                "text":        None,   # lazy-loaded by get_doc
+                "filename":    p.get("filename"),
+                "doc_id":      p.get("doc_id"),
+                "created_at":  p.get("created_at") or time.time(),
+                "chunk_count": p.get("chunk_count", 0),
+                "page_count":  p.get("page_count", 0),
+                "figures":     [{"fig_id": f["fig_id"], "page": f["page"],
+                                 "caption": f.get("caption", ""), "kind": f.get("kind", "figure"),
+                                 "png": None} for f in figs],
+                "pdf_bytes":   None,
+                "summary":     (row or {}).get("summary"),
+                "persisted":   True,
+            }
+            loaded += 1
+        _log.info("Loaded paper index", extra={"papers": loaded})
+        return loaded
 
     # ── Document access ────────────────────────────────────────────────
 
     def get_doc(self, session_id: str) -> Optional[str]:
-        """Return the full text of the paper for *session_id*, or None."""
-        return _sessions.get(session_id, {}).get("text")
+        """Return the full text of the paper for *session_id*, or None.
+
+        For persisted papers reopened after a restart, the in-memory ``text`` is
+        None — lazy-load it from storage and cache it.
+        """
+        meta = _sessions.get(session_id)
+        if meta is None:
+            return None
+        if meta.get("text"):
+            return meta["text"]
+        if meta.get("persisted"):
+            from app import storage
+            row = storage.get_paper(session_id)
+            if row and row.get("full_text"):
+                meta["text"] = row["full_text"]
+                return meta["text"]
+        return meta.get("text")
 
     def get_session_meta(self, session_id: str) -> Optional[Dict]:
         """Return session metadata dict or None if session doesn't exist."""
@@ -349,18 +420,28 @@ class KnowledgeBase:
     # ── PDF & figure access ────────────────────────────────────────────
 
     def get_pdf_bytes(self, session_id: str) -> Optional[bytes]:
-        """Return the stored original PDF bytes, or None (txt/md or not found)."""
-        return _sessions.get(session_id, {}).get("pdf_bytes")
+        """Return the original PDF bytes (from memory, or disk for reopened papers)."""
+        meta = _sessions.get(session_id, {})
+        if meta.get("pdf_bytes"):
+            return meta["pdf_bytes"]
+        if session_id in _sessions:
+            from app import storage
+            return storage.read_pdf(session_id)
+        return None
 
     def get_figures(self, session_id: str) -> List[Dict]:
-        """Return the extracted figures list (each with png bytes) for a session."""
+        """Return the figures metadata list (png bytes may be None for reopened papers)."""
         return _sessions.get(session_id, {}).get("figures", []) or []
 
     def get_figure(self, session_id: str, fig_id: str) -> Optional[Dict]:
-        """Return a single figure dict by id, or None."""
+        """Return a single figure dict by id with png bytes (loaded from disk if needed)."""
         for f in self.get_figures(session_id):
             if f.get("fig_id") == fig_id:
-                return f
+                if f.get("png"):
+                    return f
+                from app import storage
+                png = storage.read_figure_png(session_id, fig_id)
+                return {**f, "png": png}
         return None
 
     def get_page_count(self, session_id: str) -> int:

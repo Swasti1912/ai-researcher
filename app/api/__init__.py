@@ -199,6 +199,67 @@ class TeachSectionResp(BaseModel):
     figures: List[Dict[str, Any]] = []   # [{fig_id, page, caption, kind}]
     pages: List[int] = []
 
+# ── Library / persistence (P2) ────────────────────────────────────────────────
+class LibraryItem(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+    title: str = ""
+    page_count: int = 0
+    figure_count: int = 0
+    created_at: float = 0.0
+    source: str = "upload"
+    has_pdf: bool = False
+    has_summary: bool = False
+
+class LibraryResp(BaseModel):
+    papers: List[LibraryItem] = []
+
+class ReopenResp(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+    title: str = ""
+    page_count: int = 0
+    figure_count: int = 0
+    created_at: float = 0.0
+    has_pdf: bool = False
+    summary: Optional[Dict[str, Any]] = None
+
+class ChatItem(BaseModel):
+    role: str
+    content: str
+    evidence: List[Dict[str, Any]] = []
+    created_at: float = 0.0
+
+class ChatHistoryResp(BaseModel):
+    messages: List[ChatItem] = []
+
+class Rect(BaseModel):
+    x: float; y: float; w: float; h: float
+
+class Highlight(BaseModel):
+    id: str = ""
+    session_id: str = ""
+    page: int = 0
+    color: str = "yellow"
+    quote: str = ""
+    note: str = ""
+    rects: List[Rect] = []
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+class HighlightsResp(BaseModel):
+    highlights: List[Highlight] = []
+
+class HighlightCreate(BaseModel):
+    page: int
+    color: str = "yellow"
+    quote: str = ""
+    note: str = ""
+    rects: List[Rect] = []
+
+class HighlightNoteUpdate(BaseModel):
+    note: str = ""
+
 class FetchPaperReq(BaseModel):
     url: str = ""        # arXiv abs or PDF URL
     abstract: str = ""   # fallback plain text (for non-arXiv sources)
@@ -417,6 +478,22 @@ async def get_result(request_id: str):
     return ResearchResp(**s)
 
 
+async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: str) -> None:
+    """Save a freshly-ingested paper to persistent storage and mark it persisted."""
+    try:
+        from app import storage
+        kb = get_kb()
+        meta = kb.get_session_meta(session_id) or {}
+        figs = meta.get("figures", [])
+        await asyncio.to_thread(
+            lambda: storage.save_paper(session_id, {**meta, "source": source},
+                                       pdf_bytes=pdf_bytes, figures=figs)
+        )
+        meta["persisted"] = True   # protect from the in-memory TTL cleanup
+    except Exception as exc:
+        _log.warning("persist paper failed", extra={"session_id": session_id, "err": str(exc)})
+
+
 @router.post("/upload-paper", response_model=UploadResp)
 async def upload_paper(file: UploadFile = File(...)):
     """
@@ -456,6 +533,8 @@ async def upload_paper(file: UploadFile = File(...)):
             lambda: kb.ingest(text=text, filename=filename)
         )
         text_len, preview, page_count, figure_count = len(text), text[:500], 0, 0
+
+    await _persist_paper(session_id, content if filename.lower().endswith(".pdf") else None, "upload")
 
     meta = kb.get_session_meta(session_id) or {}
     return UploadResp(
@@ -533,6 +612,12 @@ async def summarize_paper(req: PaperSummarizeReq):
         # Cache summary in session meta so teach endpoint can use it
         if meta is not None:
             meta["summary"] = summary
+        # Persist the summary (title + body) so the library + reopen show it.
+        try:
+            from app import storage
+            await asyncio.to_thread(lambda: storage.update_summary(req.session_id, summary))
+        except Exception as exc:
+            _log.warning("persist summary failed", extra={"err": str(exc)})
         return PaperSummarizeResp(
             session_id=req.session_id,
             doc_id=doc_id,
@@ -559,6 +644,15 @@ async def ask_paper(req: PaperAskReq):
     try:
         agent = PaperQAAgent()
         result = await agent.answer(question=req.question, session_id=req.session_id)
+        # Persist both turns so chat history survives restart / reopen.
+        try:
+            from app import storage
+            sid = req.session_id
+            await asyncio.to_thread(lambda: storage.append_chat(sid, "user", req.question))
+            await asyncio.to_thread(lambda: storage.append_chat(
+                sid, "assistant", result.get("answer", ""), evidence=result.get("paper_evidence")))
+        except Exception as exc:
+            _log.warning("persist chat failed", extra={"err": str(exc)})
         return PaperAskResp(question=req.question, **result)
     except Exception as exc:
         _log.error("PaperAsk error", extra={"err": str(exc)})
@@ -704,6 +798,7 @@ async def paper_from_url(req: FetchPaperReq):
                 )
             )
             _log.info("Ingested external PDF", extra={"title": title, "session_id": session_id})
+            await _persist_paper(session_id, pdf_bytes, "url")
             meta = kb.get_session_meta(session_id) or {}
             return UploadResp(
                 session_id=session_id, doc_id=doc_id, filename=filename,
@@ -717,6 +812,7 @@ async def paper_from_url(req: FetchPaperReq):
         text = req.abstract
         filename = filename.replace(".pdf", ".txt")
         session_id, doc_id = await asyncio.to_thread(lambda: kb.ingest(text=text, filename=filename))
+        await _persist_paper(session_id, None, "url")
         meta = kb.get_session_meta(session_id) or {}
         return UploadResp(
             session_id=session_id, doc_id=doc_id, filename=filename,
@@ -743,9 +839,81 @@ async def delete_session(session_id: str):
 
 @router.delete("/paper/session/cleanup", response_model=Dict[str, Any])
 async def cleanup_sessions():
-    """Delete all sessions older than SESSION_MAX_AGE_HOURS (default 2 h)."""
+    """Evict stale non-persisted sessions (persisted papers are never auto-deleted)."""
     cleaned = get_kb().cleanup_old_sessions()
     return {"cleaned": cleaned}
+
+
+# ══ Library & persistence (P2) ════════════════════════════════════════════════
+# ROUTE ORDER: every literal /paper/* route above and below must be declared
+# BEFORE the greedy GET /paper/{session_id} (declared last), or e.g. /paper/library
+# would be captured as session_id="library".
+
+@router.get("/paper/library", response_model=LibraryResp)
+async def paper_library():
+    from app import storage
+    papers = await asyncio.to_thread(storage.list_papers)
+    return LibraryResp(papers=[LibraryItem(**{**p, "has_pdf": bool(p.get("has_pdf")),
+                                              "has_summary": bool(p.get("has_summary"))}) for p in papers])
+
+
+@router.get("/paper/{session_id}/chat", response_model=ChatHistoryResp)
+async def paper_chat_history(session_id: str):
+    from app import storage
+    msgs = await asyncio.to_thread(lambda: storage.get_chat(session_id))
+    return ChatHistoryResp(messages=[ChatItem(**m) for m in msgs])
+
+
+@router.get("/paper/{session_id}/highlights", response_model=HighlightsResp)
+async def list_highlights(session_id: str):
+    from app import storage
+    hls = await asyncio.to_thread(lambda: storage.list_highlights(session_id))
+    return HighlightsResp(highlights=[Highlight(**h) for h in hls])
+
+
+@router.post("/paper/{session_id}/highlights", response_model=Highlight)
+async def create_highlight(session_id: str, body: HighlightCreate):
+    from app import storage
+    if not get_kb().get_session_meta(session_id):
+        raise HTTPException(404, "Session not found")
+    rects = [r.model_dump() for r in body.rects]
+    h = await asyncio.to_thread(lambda: storage.add_highlight(
+        session_id, body.page, body.color, body.quote, body.note, rects))
+    return Highlight(**h)
+
+
+@router.patch("/paper/highlights/{highlight_id}", response_model=Highlight)
+async def update_highlight(highlight_id: str, body: HighlightNoteUpdate):
+    from app import storage
+    h = await asyncio.to_thread(lambda: storage.update_highlight_note(highlight_id, body.note))
+    if not h:
+        raise HTTPException(404, "Highlight not found")
+    return Highlight(**h)
+
+
+@router.delete("/paper/highlights/{highlight_id}", response_model=Dict[str, Any])
+async def remove_highlight(highlight_id: str):
+    from app import storage
+    await asyncio.to_thread(lambda: storage.delete_highlight(highlight_id))
+    return {"deleted": True}
+
+
+@router.get("/paper/{session_id}", response_model=ReopenResp)
+async def reopen_paper(session_id: str):
+    """Reopen a persisted paper: returns its metadata + cached summary."""
+    from app import storage
+    row = await asyncio.to_thread(lambda: storage.get_paper(session_id))
+    if not row:
+        raise HTTPException(404, f"Paper '{session_id}' not found")
+    # Ensure it's in the in-memory index (load_index runs at startup; belt-and-suspenders).
+    if not get_kb().get_session_meta(session_id):
+        await asyncio.to_thread(get_kb().load_index)
+    return ReopenResp(
+        session_id=session_id, filename=row.get("filename"), title=row.get("title") or "",
+        page_count=row.get("page_count", 0), figure_count=row.get("figure_count", 0),
+        created_at=row.get("created_at", 0.0), has_pdf=bool(row.get("pdf_path")),
+        summary=row.get("summary"),
+    )
 
 
 @router.get("/graph-topology", response_model=Topology)

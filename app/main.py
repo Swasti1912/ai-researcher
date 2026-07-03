@@ -38,6 +38,15 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
     except Exception as exc:
         log.warning("KB warmup failed (non-fatal)", extra={"err": str(exc)})
 
+    # Initialise persistent storage and rehydrate the paper library (P2).
+    try:
+        from app import storage
+        from app.knowledge_base import get_kb
+        await asyncio.to_thread(storage.init_db)
+        await asyncio.to_thread(get_kb().load_index)
+    except Exception as exc:
+        log.warning("Storage init/load failed (non-fatal)", extra={"err": str(exc)})
+
     yield
     log.info("Shutdown")
 
