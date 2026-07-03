@@ -1,8 +1,9 @@
 import React, { useState, useRef, lazy, Suspense } from 'react';
-import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw } from 'lucide-react';
+import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper } from '../services/api';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
+import FiguresStrip from './FiguresStrip';
 import Markdown from './Markdown';
 
 // Lazy-loaded: pulls in Mermaid + Recharts only when a visualization is opened.
@@ -11,6 +12,12 @@ const VizFallback = () => (
   <div className="viz-panel" style={{ padding: 40, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, color: 'var(--t2)' }}>
     <span className="spin" /> Loading visualizations…
   </div>
+);
+
+// Lazy-loaded: pulls in pdf.js only when a paper is open in the reader.
+const PdfPane = lazy(() => import('./PdfPane'));
+const PdfFallback = () => (
+  <div className="pdf-loading"><span className="spin" /> Loading PDF viewer…</div>
 );
 
 // Processing steps shown while a paper is being ingested
@@ -45,8 +52,15 @@ export default function PaperMode() {
   const [teachLesson, setTeachLesson] = useState(null);
   const [teachLoading, setTeachLoading] = useState(false);
   const [teachErr, setTeachErr]   = useState('');
+  const [paperFile, setPaperFile] = useState(null);   // browser File for client-side PDF render
+  const [hasPdf, setHasPdf]       = useState(false);  // true when a renderable PDF exists
+  const [mobileView, setMobileView] = useState('ai'); // 'pdf' | 'ai' (narrow screens)
   const fileRef = useRef();
   const chatRef = useRef();
+  const pdfPaneRef = useRef();
+
+  const locateInPdf = (text, page) => pdfPaneRef.current?.scrollToText?.(text, page ? { page } : {});
+  const locatePage = (page) => pdfPaneRef.current?.scrollToPage?.(page);
 
   // ── Upload + summarize ────────────────────────────────────────────
   const handleFile = async (file) => {
@@ -55,6 +69,8 @@ export default function PaperMode() {
     setSummarizeErr('');
     setPendingSummarize(null);
     setFilename(file.name);
+    setPaperFile(file);           // keep the File so the PDF renders client-side
+    setHasPdf(/\.pdf$/i.test(file.name));
     setSummary(null);
     setMessages([]);
     setDoneSteps([]);
@@ -68,6 +84,7 @@ export default function PaperMode() {
 
       // Store session ID immediately so it's available even if summarize fails
       setSessionId(uploaded.session_id);
+      setHasPdf((uploaded.page_count || 0) > 0);
       setProcMeta({ chunks: uploaded.chunks, chars: uploaded.text_length });
       setDoneSteps(['parse', 'embed']);
 
@@ -129,6 +146,9 @@ export default function PaperMode() {
     setSectionsOpen(false);
     setTeachLesson(null);
     setTeachErr('');
+    setPaperFile(null);
+    setHasPdf(false);
+    setMobileView('ai');
   };
 
   const handleTeach = async () => {
@@ -290,9 +310,32 @@ export default function PaperMode() {
         </div>
       )}
 
-      {/* ── Ready phase ── */}
+      {/* ── Ready phase: split reader (PDF ‖ AI insights) ── */}
       {phase === 'ready' && summary && (
-        <div className="paper-ready">
+        <>
+          {hasPdf && (
+            <div className="paper-viewtoggle">
+              <button className={mobileView === 'pdf' ? 'on' : ''} onClick={() => setMobileView('pdf')}>
+                <ScrollText size={14} /> Paper
+              </button>
+              <button className={mobileView === 'ai' ? 'on' : ''} onClick={() => setMobileView('ai')}>
+                <PanelsTopLeft size={14} /> Insights
+              </button>
+            </div>
+          )}
+
+          <div className={hasPdf ? `paper-split mv-${mobileView}` : 'paper-nopdf'}>
+            {/* Left: the actual PDF (only when a PDF is available) */}
+            {hasPdf && (
+              <div className="paper-split-pdf">
+                <Suspense fallback={<PdfFallback />}>
+                  <PdfPane apiRef={pdfPaneRef} file={paperFile} sessionId={sessionId} />
+                </Suspense>
+              </div>
+            )}
+
+            {/* Right: AI insight panels */}
+            <div className="paper-split-panels">
 
           {/* ── Summary panel ── */}
           <div className="paper-summary">
@@ -370,7 +413,9 @@ export default function PaperMode() {
                 {sectionsOpen && (
                   <div className="paper-sections-list">
                     {summary.section_breakdown.map((s, i) => (
-                      <div key={i} className="paper-section-row">
+                      <div key={i} className="paper-section-row paper-section-clickable"
+                        onClick={() => locateInPdf(s.section)}
+                        title="Find this section in the paper">
                         <div className="paper-section-name">{s.section}</div>
                         <div className="paper-section-summary">{s.summary}</div>
                       </div>
@@ -387,6 +432,9 @@ export default function PaperMode() {
               </div>
             )}
           </div>
+
+          {/* ── Figures & tables (P1) ── */}
+          <FiguresStrip sessionId={sessionId} onLocate={locatePage} />
 
           {/* ── Teach Me ── */}
           {!teachLesson && (
@@ -423,6 +471,7 @@ export default function PaperMode() {
             <ConceptCards
               concepts={summary.key_concepts}
               onAsk={(q) => { sendQuestion(q); }}
+              onLocate={(name) => locateInPdf(name)}
               disabled={asking}
             />
           )}
@@ -472,7 +521,7 @@ export default function PaperMode() {
                 </div>
               )}
               {messages.map((m, i) => (
-                <ChatMessage key={i} msg={m} onFollowUp={sendQuestion} disabled={asking} />
+                <ChatMessage key={i} msg={m} onFollowUp={sendQuestion} onLocate={locateInPdf} disabled={asking} />
               ))}
               {asking && (
                 <div className="chat-msg chat-msg-assistant">
@@ -502,7 +551,9 @@ export default function PaperMode() {
               </button>
             </div>
           </div>
-        </div>
+            </div>{/* .paper-split-panels */}
+          </div>{/* .paper-split */}
+        </>
       )}
     </div>
   );
@@ -520,7 +571,7 @@ function SummaryCard({ icon, label, text }) {
   );
 }
 
-function ChatMessage({ msg, onFollowUp, disabled }) {
+function ChatMessage({ msg, onFollowUp, onLocate, disabled }) {
   const isUser = msg.role === 'user';
   return (
     <div className={`chat-msg ${isUser ? 'chat-msg-user' : 'chat-msg-assistant'}`}>
@@ -530,9 +581,18 @@ function ChatMessage({ msg, onFollowUp, disabled }) {
           : <div className="chat-content"><Markdown>{msg.content}</Markdown></div>}
 
         {!isUser && msg.evidence?.length > 0 && (
-          <details className="chat-evidence">
-            <summary>Paper evidence ({msg.evidence.length})</summary>
-            <ul>{msg.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+          <details className="chat-evidence" open>
+            <summary>Paper evidence ({msg.evidence.length}) — click to find in PDF</summary>
+            <ul>{msg.evidence.map((e, i) => {
+              const text = typeof e === 'string' ? e : e.text;
+              const page = typeof e === 'string' ? undefined : e.page;
+              return (
+                <li key={i} className="evidence-link" onClick={() => onLocate?.(text, page)}
+                    title="Jump to this passage in the PDF">
+                  {text}{page ? <span className="evidence-page"> · p{page}</span> : null}
+                </li>
+              );
+            })}</ul>
           </details>
         )}
 

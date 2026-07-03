@@ -69,6 +69,18 @@ class UploadResp(BaseModel):
     text_length: int
     chunks: int
     text_preview: str = ""
+    page_count: int = 0
+    figure_count: int = 0
+
+class FigureMeta(BaseModel):
+    fig_id: str
+    page: int
+    caption: str = ""
+    kind: str = "figure"
+
+class FiguresResp(BaseModel):
+    session_id: str
+    figures: List[FigureMeta] = []
 
 class HealthResp(BaseModel):
     status: str = "ok"
@@ -133,12 +145,13 @@ class PaperAskReq(BaseModel):
 class PaperAskResp(BaseModel):
     question: str = ""
     answer: str = ""
-    paper_evidence: List[str] = []
+    paper_evidence: List[Dict[str, Any]] = []   # [{text, page}]
     related_papers: List[Dict[str, Any]] = []
     confidence: str = "medium"
     rag_chunks_used: int = 0
     external_papers_found: int = 0
     follow_up_questions: List[str] = []
+    rag_pages: List[int] = []
 
 class SessionDeleteResp(BaseModel):
     session_id: str
@@ -405,35 +418,83 @@ async def upload_paper(file: UploadFile = File(...)):
     _log.info("Upload", extra={"file": file.filename})
     content = await file.read()
     filename = file.filename or ""
-
-    # ── Text extraction (CPU-bound / blocking — run off the event loop) ─
-    def _extract_text() -> str:
-        if filename.lower().endswith(".pdf"):
-            try:
-                import PyPDF2
-                return "\n".join(
-                    p.extract_text() or ""
-                    for p in PyPDF2.PdfReader(io.BytesIO(content)).pages
-                )
-            except Exception:
-                return content.decode("utf-8", errors="ignore")
-        return content.decode("utf-8", errors="ignore")
-
-    text = await asyncio.to_thread(_extract_text)
-    if not text.strip():
-        raise HTTPException(400, "No text extracted")
-
-    # ── Embedding + Qdrant ingest (CPU-bound / blocking — run off the event loop) ─
     kb = get_kb()
-    session_id, doc_id = await asyncio.to_thread(kb.ingest, text, filename=filename)
 
+    if filename.lower().endswith(".pdf"):
+        # Page-aware extraction (PyMuPDF) + figures; store the PDF bytes so the
+        # viewer can render the original, and captions feed the RAG index.
+        from app.knowledge_base.pdf_extract import extract_pdf
+        result = await asyncio.to_thread(extract_pdf, content)
+        full_text = "\n".join(p["text"] for p in result["pages"])
+        if not full_text.strip() and not result["figures"]:
+            raise HTTPException(400, "No text or figures extracted from PDF")
+        session_id, doc_id = await asyncio.to_thread(
+            lambda: kb.ingest(
+                pages=result["pages"], pdf_bytes=content, figures=result["figures"],
+                page_count=result["page_count"], filename=filename,
+            )
+        )
+        text_len, preview = len(full_text), full_text[:500]
+        page_count, figure_count = result["page_count"], len(result["figures"])
+    else:
+        # Plain text (.txt / .md)
+        text = content.decode("utf-8", errors="ignore")
+        if not text.strip():
+            raise HTTPException(400, "No text extracted")
+        session_id, doc_id = await asyncio.to_thread(
+            lambda: kb.ingest(text=text, filename=filename)
+        )
+        text_len, preview, page_count, figure_count = len(text), text[:500], 0, 0
+
+    meta = kb.get_session_meta(session_id) or {}
     return UploadResp(
+        session_id=session_id, doc_id=doc_id, filename=filename,
+        text_length=text_len, chunks=meta.get("chunk_count", 0),
+        text_preview=preview, page_count=page_count, figure_count=figure_count,
+    )
+
+
+@router.get("/paper/pdf/{session_id}")
+async def get_paper_pdf(session_id: str):
+    """Stream the original PDF bytes for a session (404 if none stored)."""
+    data = get_kb().get_pdf_bytes(session_id)
+    if not data:
+        raise HTTPException(404, "No PDF stored for this session")
+    return StreamingResponse(
+        io.BytesIO(data), media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{session_id}.pdf"',
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
+
+
+@router.get("/paper/figures/{session_id}", response_model=FiguresResp)
+async def list_paper_figures(session_id: str):
+    """List extracted figures/tables (metadata only, no image bytes)."""
+    kb = get_kb()
+    if not kb.get_session_meta(session_id):
+        raise HTTPException(404, f"Session '{session_id}' not found")
+    figs = kb.get_figures(session_id)
+    return FiguresResp(
         session_id=session_id,
-        doc_id=doc_id,
-        filename=filename,
-        text_length=len(text),
-        chunks=kb.get_session_meta(session_id).get("chunk_count", 0) if kb.get_session_meta(session_id) else 0,
-        text_preview=text[:500],
+        figures=[
+            FigureMeta(fig_id=f["fig_id"], page=f["page"],
+                       caption=f.get("caption", ""), kind=f.get("kind", "figure"))
+            for f in figs
+        ],
+    )
+
+
+@router.get("/paper/figure/{session_id}/{fig_id}")
+async def get_paper_figure(session_id: str, fig_id: str):
+    """Stream a single figure PNG (404 if missing or caption-only table)."""
+    f = get_kb().get_figure(session_id, fig_id)
+    if not f or not f.get("png"):
+        raise HTTPException(404, "Figure not found")
+    return StreamingResponse(
+        io.BytesIO(f["png"]), media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 
@@ -552,16 +613,10 @@ async def paper_from_url(req: FetchPaperReq):
 
     title = req.title or "external_paper"
     filename = re.sub(r"[^a-z0-9_]", "_", title.lower())[:60] + ".pdf"
+    pdf_bytes: Optional[bytes] = None
     text = ""
 
-    # ── Try to fetch paper content from arXiv ────────────────────────────────
-    if req.url:
-        url = req.url.strip()
-        # Convert abs URL → PDF URL  e.g. arxiv.org/abs/2401.12345 → /pdf/2401.12345
-        pdf_url = re.sub(r"arxiv\.org/abs/", "arxiv.org/pdf/", url)
-        if not pdf_url.endswith(".pdf"):
-            pdf_url = pdf_url.rstrip("/")
-
+    async def _fetch_pdf(pdf_url: str) -> Optional[bytes]:
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 resp = await client.get(
@@ -569,81 +624,77 @@ async def paper_from_url(req: FetchPaperReq):
                     headers={"User-Agent": "AI-Researcher/1.0 (research tool; mailto:noreply@example.com)"},
                 )
             if resp.status_code == 200 and resp.content:
-                def _parse_pdf(content: bytes) -> str:
-                    import PyPDF2, io
-                    try:
-                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(content)).pages)
-                    except Exception:
-                        return ""
-                text = await asyncio.to_thread(_parse_pdf, resp.content)
+                return resp.content
         except Exception as exc:
             _log.warning("PDF fetch failed", extra={"url": pdf_url, "err": str(exc)})
+        return None
 
-    # ── Fallback 1: supplied abstract / summary text ──────────────────────────
-    if not text.strip() and req.abstract:
-        text = req.abstract
-        filename = filename.replace(".pdf", ".txt")
+    # ── Try direct arXiv URL ────────────────────────────────────────────────
+    if req.url:
+        pdf_url = re.sub(r"arxiv\.org/abs/", "arxiv.org/pdf/", req.url.strip())
+        if not pdf_url.endswith(".pdf"):
+            pdf_url = pdf_url.rstrip("/")
+        pdf_bytes = await _fetch_pdf(pdf_url)
 
-    # ── Fallback 2: search arXiv by title (try full title, then first 5 words) ─
-    if not text.strip() and req.title:
+    # ── Fallback: search arXiv by title (full title, then first 5 words) ─────
+    if not pdf_bytes and req.title:
         import urllib.parse, xml.etree.ElementTree as ET
 
-        async def _arxiv_search_and_fetch(query_title: str) -> str:
-            """Search arXiv for query_title, return extracted PDF text or ''."""
+        async def _arxiv_search(query_title: str) -> Optional[bytes]:
             try:
                 search_q = urllib.parse.quote_plus(f"ti:{query_title}")
                 arxiv_url = f"https://export.arxiv.org/api/query?search_query={search_q}&max_results=1&sortBy=relevance"
                 async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as c:
                     sr = await c.get(arxiv_url, headers={"User-Agent": "AI-Researcher/1.0"})
                 if sr.status_code != 200:
-                    return ""
+                    return None
                 ns = {"a": "http://www.w3.org/2005/Atom"}
-                root = ET.fromstring(sr.text)
-                entries = root.findall("a:entry", ns)
-                if not entries:
-                    return ""
-                for entry in entries:
+                for entry in ET.fromstring(sr.text).findall("a:entry", ns):
                     for lnk in entry.findall("a:link", ns):
                         if lnk.get("title") == "pdf":
-                            pdf_url = lnk.get("href", "").replace("http://", "https://")
-                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c2:
-                                pr = await c2.get(pdf_url, headers={"User-Agent": "AI-Researcher/1.0"})
-                            if pr.status_code == 200 and pr.content:
-                                def _parse_pdf(b: bytes) -> str:
-                                    import PyPDF2, io
-                                    try:
-                                        return "\n".join(p.extract_text() or "" for p in PyPDF2.PdfReader(io.BytesIO(b)).pages)
-                                    except Exception:
-                                        return ""
-                                return await asyncio.to_thread(_parse_pdf, pr.content)
+                            return await _fetch_pdf(lnk.get("href", "").replace("http://", "https://"))
             except Exception as exc:
                 _log.warning("arXiv title search failed", extra={"err": str(exc)})
-            return ""
+            return None
 
-        # Try full title first, then first 5 words as a broader fallback
-        text = await _arxiv_search_and_fetch(req.title)
-        if text.strip():
-            _log.info("arXiv full-title fallback succeeded", extra={"title": req.title})
-        else:
-            short_title = " ".join(req.title.split()[:5])
-            text = await _arxiv_search_and_fetch(short_title)
-            if text.strip():
-                _log.info("arXiv short-title fallback succeeded", extra={"short": short_title})
-
-    if not text.strip():
-        raise HTTPException(404, "Paper not accessible — PDF URL unavailable, no abstract provided, and no matching arXiv entry found")
+        pdf_bytes = await _arxiv_search(req.title) or await _arxiv_search(" ".join(req.title.split()[:5]))
 
     kb = get_kb()
-    session_id, doc_id = await asyncio.to_thread(kb.ingest, text, filename=filename)
-    _log.info("Ingested external paper", extra={"title": title, "session_id": session_id})
-    return UploadResp(
-        session_id=session_id,
-        doc_id=doc_id,
-        filename=filename,
-        text_length=len(text),
-        chunks=kb.get_session_meta(session_id).get("chunk_count", 0) if kb.get_session_meta(session_id) else 0,
-        text_preview=text[:500],
-    )
+
+    # ── Ingest: PDF path (page-aware + figures + stored bytes) ───────────────
+    if pdf_bytes:
+        from app.knowledge_base.pdf_extract import extract_pdf
+        result = await asyncio.to_thread(extract_pdf, pdf_bytes)
+        full_text = "\n".join(p["text"] for p in result["pages"])
+        if full_text.strip() or result["figures"]:
+            session_id, doc_id = await asyncio.to_thread(
+                lambda: kb.ingest(
+                    pages=result["pages"], pdf_bytes=pdf_bytes, figures=result["figures"],
+                    page_count=result["page_count"], filename=filename,
+                )
+            )
+            _log.info("Ingested external PDF", extra={"title": title, "session_id": session_id})
+            meta = kb.get_session_meta(session_id) or {}
+            return UploadResp(
+                session_id=session_id, doc_id=doc_id, filename=filename,
+                text_length=len(full_text), chunks=meta.get("chunk_count", 0),
+                text_preview=full_text[:500], page_count=result["page_count"],
+                figure_count=len(result["figures"]),
+            )
+
+    # ── Fallback: abstract-only (no PDF → /paper/pdf will 404) ───────────────
+    if req.abstract and req.abstract.strip():
+        text = req.abstract
+        filename = filename.replace(".pdf", ".txt")
+        session_id, doc_id = await asyncio.to_thread(lambda: kb.ingest(text=text, filename=filename))
+        meta = kb.get_session_meta(session_id) or {}
+        return UploadResp(
+            session_id=session_id, doc_id=doc_id, filename=filename,
+            text_length=len(text), chunks=meta.get("chunk_count", 0),
+            text_preview=text[:500], page_count=0, figure_count=0,
+        )
+
+    raise HTTPException(404, "Paper not accessible — PDF URL unavailable, no abstract provided, and no matching arXiv entry found")
 
 
 @router.delete("/paper/session/{session_id}", response_model=SessionDeleteResp)

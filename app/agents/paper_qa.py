@@ -88,10 +88,12 @@ class PaperQAAgent(BaseAgent):
         """
         kb = get_kb()
 
-        # 1. RAG: retrieve relevant chunks scoped to this session
-        rag_chunks: List[str] = []
+        # 1. RAG: retrieve relevant chunks (with page metadata) scoped to this session
+        rag_hits: List[Dict[str, Any]] = []
         if session_id or kb.chunk_count > 0:
-            rag_chunks = kb.search(question, session_id=session_id, top_k=_TOP_K_CHUNKS)
+            rag_hits = kb.search_with_meta(question, session_id=session_id, top_k=_TOP_K_CHUNKS)
+        rag_chunks = [h["text"] for h in rag_hits]
+        rag_pages = [h["page_number"] for h in rag_hits if h.get("page_number")]
 
         rag_text = (
             "\n---\n".join(truncate(c, _MAX_CHUNK_CHARS) for c in rag_chunks)
@@ -140,6 +142,11 @@ class PaperQAAgent(BaseAgent):
             fuq = []
         result["follow_up_questions"] = [q for q in fuq if isinstance(q, str)][:3]
 
+        # Attach a best-effort source page to each evidence quote so the UI can
+        # jump to it in the PDF. Evidence is free-text, so match by overlap.
+        result["paper_evidence"] = _attach_pages(result.get("paper_evidence", []), rag_hits)
+        result["rag_pages"] = rag_pages
+
         result["rag_chunks_used"] = len(rag_chunks)
         result["external_papers_found"] = len([l for l in ext_papers.splitlines() if l.strip()])
         return result
@@ -149,6 +156,38 @@ class PaperQAAgent(BaseAgent):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _attach_pages(evidence: Any, rag_hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Turn evidence (list of quote strings) into ``[{"text", "page"}]`` by matching
+    each quote to the retrieved chunk with the highest text overlap. Falls back to
+    the top-ranked chunk's page. Idempotent if evidence is already objects.
+    """
+    if not isinstance(evidence, list):
+        return []
+    top_page = None
+    for h in rag_hits:
+        if h.get("page_number"):
+            top_page = h["page_number"]
+            break
+
+    out: List[Dict[str, Any]] = []
+    for item in evidence:
+        text = item.get("text", "") if isinstance(item, dict) else str(item)
+        if not text.strip():
+            continue
+        page = item.get("page") if isinstance(item, dict) else None
+        if not page:
+            probe = text.strip()[:60].lower()
+            best_page, best_len = top_page, 0
+            for h in rag_hits:
+                ct = (h.get("text") or "").lower()
+                if probe and probe in ct and len(ct) > best_len:
+                    best_page, best_len = h.get("page_number") or top_page, len(ct)
+            page = best_page
+        out.append({"text": text, "page": page})
+    return out
+
 
 async def _safe_fetch(fetcher, query: str, limit: int) -> Dict[str, Any]:
     try:

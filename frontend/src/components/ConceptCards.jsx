@@ -5,8 +5,9 @@
  * Clicking sends a pre-built deep-dive question to the chat via onAsk().
  */
 import React, { useState } from 'react';
+import { MapPin } from 'lucide-react';
 
-export default function ConceptCards({ concepts = [], onAsk, disabled }) {
+export default function ConceptCards({ concepts = [], onAsk, onLocate, disabled }) {
   const [expanded, setExpanded] = useState(null);
 
   if (!concepts.length) return null;
@@ -36,7 +37,15 @@ export default function ConceptCards({ concepts = [], onAsk, disabled }) {
             >
               <div className="concept-card-top">
                 <div className="concept-name">{name}</div>
-                <div className="concept-expand">{isOpen ? '▴' : '▾'}</div>
+                <div className="concept-card-actions">
+                  {onLocate && (
+                    <button className="concept-locate" title="Find in PDF"
+                      onClick={(e) => { e.stopPropagation(); onLocate(name); }}>
+                      <MapPin size={13} />
+                    </button>
+                  )}
+                  <div className="concept-expand">{isOpen ? '▴' : '▾'}</div>
+                </div>
               </div>
               <div className="concept-def">{def}</div>
               {isOpen && (

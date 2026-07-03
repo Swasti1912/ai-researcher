@@ -37,3 +37,10 @@ export const fetchPaperFromUrl = (url, abstract, title) =>
 
 export const explainSubQuestion = (question, context, api_results) =>
   http.post('/research/subquestion', { question, context, api_results }, { timeout: 90_000 }).then(r => r.data);
+
+// Paper reader — figures + PDF
+export const getPaperFigures = (sessionId) =>
+  http.get(`/paper/figures/${sessionId}`).then(r => r.data);
+
+export const paperFigureUrl = (sessionId, figId) => `/api/paper/figure/${sessionId}/${figId}`;
+export const paperPdfUrl = (sessionId) => `/api/paper/pdf/${sessionId}`;

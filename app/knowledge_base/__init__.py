@@ -106,8 +106,12 @@ class KnowledgeBase:
 
     def ingest(
         self,
-        text: str,
+        text: Optional[str] = None,
         *,
+        pages: Optional[List[Dict]] = None,
+        pdf_bytes: Optional[bytes] = None,
+        figures: Optional[List[Dict]] = None,
+        page_count: int = 0,
         session_id: Optional[str] = None,
         filename: Optional[str] = None,
         chunk_size: int = 800,
@@ -116,36 +120,64 @@ class KnowledgeBase:
         """
         Chunk, embed, and index a document in Qdrant.
 
-        Args:
-            text:       Full document text.
-            session_id: Caller-supplied session ID, or a new UUID is generated.
-            filename:   Human label (stored in session metadata).
-            chunk_size: Characters per chunk.
-            overlap:    Overlap between adjacent chunks.
+        Two input modes:
+          * Plain text (legacy / research mode / .txt / .md): pass ``text``.
+          * PDF (page-aware): pass ``pages`` = [{"page_number", "text"}], plus
+            optional ``pdf_bytes``, ``figures`` (from pdf_extract.extract_pdf),
+            and ``page_count``. Chunks are cut per page so each carries an exact
+            ``page_number``. Figure captions are embedded as extra RAG chunks.
 
-        Returns:
-            ``(session_id, doc_id)`` — both strings.
+        Returns ``(session_id, doc_id)``.
         """
-        if not text or not text.strip():
-            raise ValueError("Cannot ingest empty text")
+        # ── Build (chunk, page_number, kind, fig_id) tuples ──────────────
+        records: List[Dict] = []          # {"text", "page", "kind", "fig_id"}
+        if pages:
+            for pg in pages:
+                pno = int(pg.get("page_number") or 0)
+                for ch in _split(pg.get("text") or "", chunk_size, overlap):
+                    if ch.strip():
+                        records.append({"text": ch, "page": pno, "kind": "body", "fig_id": None})
+            full_text = "\n".join(pg.get("text") or "" for pg in pages)
+        else:
+            if not text or not text.strip():
+                raise ValueError("Cannot ingest empty text")
+            for ch in _split(text, chunk_size, overlap):
+                if ch.strip():
+                    records.append({"text": ch, "page": 0, "kind": "body", "fig_id": None})
+            full_text = text
+
+        body_count = len(records)
+
+        # Figure captions → additional retrievable chunks
+        for fig in (figures or []):
+            cap = (fig.get("caption") or "").strip()
+            if cap:
+                records.append({
+                    "text": cap, "page": int(fig.get("page") or 0),
+                    "kind": "figure_caption", "fig_id": fig.get("fig_id"),
+                })
+
+        if not records:
+            raise ValueError("Cannot ingest empty document")
 
         session_id = session_id or str(uuid.uuid4())
-        doc_id = hashlib.sha256(text[:512].encode()).hexdigest()[:16]
+        doc_id = hashlib.sha256(full_text[:512].encode()).hexdigest()[:16]
 
-        chunks = _split(text, chunk_size, overlap)
         model  = _get_model()
         client = _get_client()
-
         from app.config import get_settings
         collection = get_settings().qdrant_collection
 
         _log.info("Embedding chunks", extra={
-            "session_id": session_id, "chunks": len(chunks), "file": filename
+            "session_id": session_id, "chunks": len(records),
+            "body": body_count, "figures": len(figures or []), "file": filename,
         })
 
-        vectors = model.encode(chunks, batch_size=32, show_progress_bar=False).tolist()
+        vectors = model.encode([r["text"] for r in records],
+                               batch_size=32, show_progress_bar=False).tolist()
 
         from qdrant_client.models import PointStruct
+        now = time.time()
         points = [
             PointStruct(
                 id=str(uuid.uuid4()),
@@ -153,26 +185,32 @@ class KnowledgeBase:
                 payload={
                     "session_id":  session_id,
                     "doc_id":      doc_id,
-                    "text":        chunk,
+                    "text":        r["text"],
                     "chunk_index": i,
-                    "created_at":  time.time(),
+                    "page_number": r["page"],
+                    "kind":        r["kind"],
+                    "fig_id":      r["fig_id"],
+                    "created_at":  now,
                 },
             )
-            for i, (chunk, vec) in enumerate(zip(chunks, vectors))
+            for i, (r, vec) in enumerate(zip(records, vectors))
         ]
-
         client.upsert(collection_name=collection, points=points)
 
         _sessions[session_id] = {
-            "text":        text,
+            "text":        full_text,
             "filename":    filename,
             "doc_id":      doc_id,
-            "created_at":  time.time(),
-            "chunk_count": len(chunks),
+            "created_at":  now,
+            "chunk_count": body_count,
+            "pdf_bytes":   pdf_bytes,
+            "figures":     figures or [],
+            "page_count":  page_count,
         }
 
         _log.info("Ingest complete", extra={
-            "session_id": session_id, "doc_id": doc_id, "chunks": len(chunks)
+            "session_id": session_id, "doc_id": doc_id,
+            "chunks": len(records), "pages": page_count,
         })
         return session_id, doc_id
 
@@ -197,16 +235,39 @@ class KnowledgeBase:
         Returns:
             List of text chunks ranked by cosine similarity.
         """
-        # If no papers have been ingested at all, there is nothing to search.
+        return [p.payload["text"] for p in self._query(query, session_id, top_k)]
+
+    def search_with_meta(
+        self,
+        query: str,
+        session_id: Optional[str] = None,
+        top_k: int = 5,
+    ) -> List[Dict]:
+        """
+        Like :meth:`search` but returns payload metadata per hit:
+        ``[{"text", "page_number", "kind", "fig_id", "score"}, ...]``.
+        """
+        out = []
+        for p in self._query(query, session_id, top_k):
+            pl = p.payload or {}
+            out.append({
+                "text":        pl.get("text", ""),
+                "page_number": pl.get("page_number", 0),
+                "kind":        pl.get("kind", "body"),
+                "fig_id":      pl.get("fig_id"),
+                "score":       getattr(p, "score", None),
+            })
+        return out
+
+    def _query(self, query: str, session_id: Optional[str], top_k: int):
+        """Shared vector query → list of scored points (empty if nothing indexed)."""
         if not _sessions:
             return []
-        # If a specific session is requested but doesn't exist, return empty.
         if session_id and session_id not in _sessions:
             return []
 
         model  = _get_model()
         client = _get_client()
-
         from app.config import get_settings
         collection = get_settings().qdrant_collection
 
@@ -225,7 +286,7 @@ class KnowledgeBase:
             query_filter=search_filter,
             limit=top_k,
         )
-        return [p.payload["text"] for p in result.points]
+        return list(result.points)
 
     # ── Session management ─────────────────────────────────────────────
 
@@ -284,6 +345,26 @@ class KnowledgeBase:
     def get_session_meta(self, session_id: str) -> Optional[Dict]:
         """Return session metadata dict or None if session doesn't exist."""
         return _sessions.get(session_id)
+
+    # ── PDF & figure access ────────────────────────────────────────────
+
+    def get_pdf_bytes(self, session_id: str) -> Optional[bytes]:
+        """Return the stored original PDF bytes, or None (txt/md or not found)."""
+        return _sessions.get(session_id, {}).get("pdf_bytes")
+
+    def get_figures(self, session_id: str) -> List[Dict]:
+        """Return the extracted figures list (each with png bytes) for a session."""
+        return _sessions.get(session_id, {}).get("figures", []) or []
+
+    def get_figure(self, session_id: str, fig_id: str) -> Optional[Dict]:
+        """Return a single figure dict by id, or None."""
+        for f in self.get_figures(session_id):
+            if f.get("fig_id") == fig_id:
+                return f
+        return None
+
+    def get_page_count(self, session_id: str) -> int:
+        return _sessions.get(session_id, {}).get("page_count", 0)
 
     # ── Warmup ────────────────────────────────────────────────────────
 

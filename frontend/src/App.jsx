@@ -140,7 +140,7 @@ export default function App() {
       ) : (
         <div className="body body-full">
           <main className="main">
-            <div className="main-inner">
+            <div className="main-inner main-inner-wide">
               <PaperMode />
             </div>
           </main>
