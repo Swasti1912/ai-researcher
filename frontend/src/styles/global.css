@@ -330,6 +330,8 @@ body{
    Paper Q&A mode — refreshed to inherit new tokens
    ══════════════════════════════════════════════════════════════════════ */
 .paper-mode{display:flex;flex-direction:column;gap:20px}
+.paper-back{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t2);font-family:var(--f);font-size:.78rem;font-weight:600;padding:6px 12px;cursor:pointer;transition:.15s;margin-bottom:-4px}
+.paper-back:hover{border-color:var(--orange);color:var(--orange);background:var(--orange-d)}
 
 .paper-drop{border:2px dashed var(--bdr2);border-radius:var(--r-lg);padding:64px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;cursor:pointer;transition:.2s;text-align:center;background:var(--bg2)}
 .paper-drop:hover{border-color:var(--orange);background:var(--orange-d)}

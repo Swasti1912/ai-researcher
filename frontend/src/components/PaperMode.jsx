@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink } from 'lucide-react';
+import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink, ArrowLeft } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper, fetchPaperFromUrl,
   getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
 import ConceptCards from './ConceptCards';
@@ -34,7 +34,7 @@ const PROC_STEPS = [
 
 const DEPTH_COLORS = { beginner: 'bdg-g', intermediate: 'bdg-o', expert: 'bdg-r' };
 
-export default function PaperMode({ openRequest = null, onConsumed }) {
+export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [phase, setPhase]         = useState('upload'); // upload | processing | ready
   const [sessionId, setSessionId] = useState(null);
   const [openErr, setOpenErr]     = useState(null);     // { message, url, title } for inaccessible from-URL papers
@@ -315,6 +315,13 @@ export default function PaperMode({ openRequest = null, onConsumed }) {
   // ── Render ────────────────────────────────────────────────────────
   return (
     <div className="paper-mode">
+
+      {/* ── Back to research results (shown when opened from a deep-dive) ── */}
+      {onBack && (
+        <button className="paper-back" onClick={onBack}>
+          <ArrowLeft size={15} /> Back to results
+        </button>
+      )}
 
       {/* ── Upload phase ── */}
       {phase === 'upload' && (

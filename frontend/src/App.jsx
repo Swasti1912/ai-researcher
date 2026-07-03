@@ -152,7 +152,11 @@ export default function App() {
         <div className="body body-full">
           <main className="main">
             <div className="main-inner main-inner-wide">
-              <PaperMode openRequest={openPaper} onConsumed={() => setOpenPaper(null)} />
+              <PaperMode
+                openRequest={openPaper}
+                onConsumed={() => setOpenPaper(null)}
+                onBack={result ? () => setMode('research') : undefined}
+              />
             </div>
           </main>
         </div>
