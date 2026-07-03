@@ -127,14 +127,19 @@ class PaperQAAgent(BaseAgent):
         if parsed and isinstance(parsed, dict):
             result = parsed
         else:
-            logger.warning("PaperQA: failed to parse JSON, using raw text")
+            logger.warning("PaperQA: failed to parse JSON, salvaging answer text")
             result = {
-                "answer": raw,
+                "answer": _salvage_answer(raw),
                 "paper_evidence": [],
                 "related_papers": [],
                 "confidence": "medium",
                 "follow_up_questions": [],
             }
+
+        # The model sometimes nests the answer as an object/array (or returns
+        # malformed JSON we salvaged above). Always hand the UI clean prose —
+        # never a raw JSON blob.
+        result["answer"] = _as_text(result.get("answer", "")).strip()
 
         # Ensure follow_up_questions is always a list of strings
         fuq = result.get("follow_up_questions", [])
@@ -156,6 +161,59 @@ class PaperQAAgent(BaseAgent):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _unescape(s: str) -> str:
+    return (s.replace("\\n", "\n").replace("\\t", "\t")
+             .replace('\\"', '"').replace("\\\\", "\\"))
+
+
+def _as_text(val: Any) -> str:
+    """Flatten a string / list / dict answer into readable markdown prose."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        return "\n\n".join(_as_text(v) for v in val if v is not None)
+    if isinstance(val, dict):
+        return "\n\n".join(_as_text(v) for v in val.values() if v is not None)
+    return str(val)
+
+
+def _salvage_answer(raw: str) -> str:
+    """
+    Best-effort readable text when the LLM's reply isn't valid JSON.
+
+    The flaky model sometimes emits e.g. ``{"answer": {"### Heading", "body…"}}``
+    (invalid JSON). Rather than dumping that blob into the chat, pull the answer
+    field's quoted fragments and join them into prose.
+    """
+    import re
+
+    s = raw.strip()
+    s = re.sub(r"^```(?:json)?", "", s).strip()
+    s = re.sub(r"```$", "", s).strip()
+
+    if s.lstrip().startswith("{") and '"answer"' in s:
+        m = re.search(
+            r'"answer"\s*:\s*(.*?)'
+            r'(?:,\s*"(?:paper_evidence|related_papers|confidence|follow_up_questions)"\s*:|\}\s*$)',
+            s, re.DOTALL,
+        )
+        if m:
+            chunk = m.group(1).strip()
+            # A single quoted string → the answer directly.
+            if chunk.startswith('"') and chunk.rstrip().endswith('"') and chunk.count('"') == 2:
+                return _unescape(chunk.strip().strip('"'))
+            # Otherwise collect every quoted fragment and join.
+            parts = re.findall(r'"((?:[^"\\]|\\.)*)"', chunk)
+            if parts:
+                text = "\n\n".join(_unescape(p) for p in parts if p.strip())
+                if text.strip():
+                    return text
+            cleaned = chunk.strip("{}[]\" \n")
+            if cleaned:
+                return _unescape(cleaned)
+    return s
+
 
 def _attach_pages(evidence: Any, rag_hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """

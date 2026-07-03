@@ -62,9 +62,12 @@ export default function App() {
   const clearPaper = () => { setPaper(null); setPaperInfo(null); };
 
   const runQuery = async (q) => {
-    const question = (q ?? query).trim();
+    // q may be a string (suggestion chip / explicit call) or nothing. Guard
+    // against an event object arriving from a button's onClick={onSubmit}.
+    const arg = typeof q === 'string' ? q : null;
+    const question = (arg ?? query).trim();
     if (!question || loading) return;
-    if (q) setQuery(q);
+    if (arg) setQuery(arg);
     setLoading(true); setError(null); setResult(null);
     setActive(0); setDone([]); animate();
     try {
