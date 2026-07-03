@@ -200,12 +200,27 @@ def delete_paper(session_id: str) -> None:
     shutil.rmtree(_paper_dir(session_id), ignore_errors=True)
 
 
+def _resolve(session_id: str, stored: Optional[str], *parts: str) -> Optional[str]:
+    """Prefer the path rebuilt from the current data_dir (portable across a
+    relocated/mounted data dir, e.g. a container) and fall back to the absolute
+    path recorded at write time."""
+    if stored is None:
+        return None
+    canonical = str(_paper_dir(session_id).joinpath(*parts))
+    if os.path.exists(canonical):
+        return canonical
+    return stored if os.path.exists(stored) else None
+
+
 def read_pdf(session_id: str) -> Optional[bytes]:
     with _lock:
         row = _c().execute("SELECT pdf_path FROM papers WHERE session_id=?", (session_id,)).fetchone()
-    if not row or not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
+    if not row:
         return None
-    with open(row["pdf_path"], "rb") as f:
+    path = _resolve(session_id, row["pdf_path"], "paper.pdf")
+    if not path:
+        return None
+    with open(path, "rb") as f:
         return f.read()
 
 
@@ -223,9 +238,12 @@ def read_figure_png(session_id: str, fig_id: str) -> Optional[bytes]:
         row = _c().execute(
             "SELECT png_path FROM figures WHERE session_id=? AND fig_id=?", (session_id, fig_id),
         ).fetchone()
-    if not row or not row["png_path"] or not os.path.exists(row["png_path"]):
+    if not row or not row["png_path"]:
         return None
-    with open(row["png_path"], "rb") as f:
+    path = _resolve(session_id, row["png_path"], "figures", f"{_safe_name(fig_id)}.png")
+    if not path:
+        return None
+    with open(path, "rb") as f:
         return f.read()
 
 
