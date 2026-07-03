@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 import Markdown from './Markdown';
 import Viz from './Viz';
-import PaperDeepDive from './PaperDeepDive';
 import { explainSubQuestion } from '../services/api';
 
 const SOURCE_META = {
@@ -219,8 +218,7 @@ function DetailsDrawer({ r }) {
 }
 
 /* ── Main ────────────────────────────────────────────────────────────── */
-export default function Results({ result: r }) {
-  const [divePaper, setDivePaper] = useState(null);
+export default function Results({ result: r, onOpenPaper }) {
   if (!r) return null;
 
   const papers = useMemo(() => extractPapers(r.api_results), [r.api_results]);
@@ -257,7 +255,7 @@ export default function Results({ result: r }) {
               <SubQItem
                 key={i} index={i} question={sq.question}
                 context={r.aggregated_context} apiResults={r.api_results}
-                onDive={setDivePaper}
+                onDive={onOpenPaper}
               />
             ))}
           </div>
@@ -269,15 +267,13 @@ export default function Results({ result: r }) {
         <div className="ref-section">
           <div className="ref-heading"><Library size={13} /> Referenced papers · {papers.length}</div>
           <div className="ref-grid">
-            {papers.map((p, i) => <PaperCard key={i} p={p} onDive={setDivePaper} />)}
+            {papers.map((p, i) => <PaperCard key={i} p={p} onDive={onOpenPaper} />)}
           </div>
         </div>
       )}
 
       {/* Technical details */}
       <DetailsDrawer r={r} />
-
-      {divePaper && <PaperDeepDive paper={divePaper} onClose={() => setDivePaper(null)} />}
     </div>
   );
 }

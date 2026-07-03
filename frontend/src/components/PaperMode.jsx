@@ -1,6 +1,6 @@
-import React, { useState, useRef, lazy, Suspense } from 'react';
-import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft } from 'lucide-react';
-import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper,
+import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink } from 'lucide-react';
+import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper, fetchPaperFromUrl,
   getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
@@ -34,9 +34,10 @@ const PROC_STEPS = [
 
 const DEPTH_COLORS = { beginner: 'bdg-g', intermediate: 'bdg-o', expert: 'bdg-r' };
 
-export default function PaperMode() {
+export default function PaperMode({ openRequest = null, onConsumed }) {
   const [phase, setPhase]         = useState('upload'); // upload | processing | ready
   const [sessionId, setSessionId] = useState(null);
+  const [openErr, setOpenErr]     = useState(null);     // { message, url, title } for inaccessible from-URL papers
   const [filename, setFilename]   = useState('');
   const [summary, setSummary]     = useState(null);
   const [procStep, setProcStep]   = useState(null);
@@ -113,11 +114,53 @@ export default function PaperMode() {
     }
   };
 
+  // ── Open a paper the parent asked us to (from the research deep-dive) ──
+  // A request is either { sid } (already-ingested session) or
+  // { url, title, abstract } (fetch + ingest from an external source). Either
+  // way we route through reopenPaper, which auto-summarizes a fresh session —
+  // so the research "Summarize & visualize" reuses this whole page instead of a
+  // parallel modal.
+  const openFromRequest = async (req) => {
+    if (!req) return;
+    setOpenErr(null);
+    if (req.sid) { reopenPaper(req.sid); return; }
+    if (!req.url) return;
+
+    setPaperFile(null); setMessages([]); setHighlights([]);
+    setVizData(null); setTeachLesson(null); setSummary(null);
+    setFilename(req.title || 'Fetching paper…');
+    setPhase('processing');
+    setProcStep('parse'); setDoneSteps([]); setProcMeta({});
+    try {
+      setProcStep('embed'); setDoneSteps(['parse']);
+      const up = await fetchPaperFromUrl(req.url, req.abstract || '', req.title || '');
+      setProcMeta({ chunks: up.chunks, chars: up.text_length });
+      await reopenPaper(up.session_id);   // loads meta + auto-summarizes
+    } catch (e) {
+      setOpenErr({
+        message: "This paper doesn't have an accessible full text to summarize.",
+        url: req.url,
+        title: req.title,
+      });
+      setPhase('upload');
+    }
+  };
+
+  const openTokenRef = useRef(null);
+  useEffect(() => {
+    if (!openRequest || openTokenRef.current === openRequest) return;
+    openTokenRef.current = openRequest;
+    openFromRequest(openRequest);
+    onConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
+
   // ── Upload + summarize ────────────────────────────────────────────
   const handleFile = async (file) => {
     if (!file) return;
     setUploadErr('');
     setSummarizeErr('');
+    setOpenErr(null);
     setPendingSummarize(null);
     setFilename(file.name);
     setPaperFile(file);           // keep the File so the PDF renders client-side
@@ -194,6 +237,7 @@ export default function PaperMode() {
     setProcMeta({});
     setUploadErr('');
     setSummarizeErr('');
+    setOpenErr(null);
     setPendingSummarize(null);
     setVizData(null);
     setVizErr('');
@@ -291,6 +335,22 @@ export default function PaperMode() {
           <div className="paper-drop-title">Drop a paper here</div>
           <div className="paper-drop-sub">PDF, TXT, or Markdown · Click or drag</div>
           {uploadErr && <div className="paper-err">{uploadErr}</div>}
+        </div>
+      )}
+
+      {/* ── Inaccessible external paper (from the research deep-dive) ── */}
+      {phase === 'upload' && openErr && (
+        <div className="paper-drop" style={{ marginTop: 12, cursor: 'default' }}
+          onClick={e => e.stopPropagation()}>
+          <AlertTriangle className="paper-drop-icon" style={{ color: 'var(--yellow)' }} />
+          <div className="paper-drop-title">{openErr.title || 'Paper'}</div>
+          <div className="paper-drop-sub">{openErr.message}</div>
+          {openErr.url && (
+            <a className="btn btn-p" href={openErr.url} target="_blank" rel="noopener noreferrer"
+              style={{ marginTop: 10, textDecoration: 'none' }}>
+              <ExternalLink size={14} /> Open source
+            </a>
+          )}
         </div>
       )}
 

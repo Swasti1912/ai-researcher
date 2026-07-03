@@ -41,7 +41,15 @@ export default function App() {
   const [done, setDone]           = useState([]);
   const [result, setResult]       = useState(null);
   const [error, setError]         = useState(null);
+  const [openPaper, setOpenPaper] = useState(null);   // paper to open in Paper Q&A from a research deep-dive
   const timers = useRef([]);
+
+  // Research "Summarize & visualize" → open the paper in the full Paper Q&A
+  // page (fetch + ingest + summarize + chat + PDF), instead of a parallel modal.
+  const openInPaperMode = (p) => {
+    setOpenPaper({ url: p.url, title: p.title, abstract: p.abstract });
+    setMode('paper');
+  };
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
 
@@ -130,7 +138,7 @@ export default function App() {
                 </div>
               )}
 
-              {result && <Results result={result} />}
+              {result && <Results result={result} onOpenPaper={openInPaperMode} />}
             </div>
           </main>
 
@@ -144,7 +152,7 @@ export default function App() {
         <div className="body body-full">
           <main className="main">
             <div className="main-inner main-inner-wide">
-              <PaperMode />
+              <PaperMode openRequest={openPaper} onConsumed={() => setOpenPaper(null)} />
             </div>
           </main>
         </div>
