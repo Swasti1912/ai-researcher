@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import router
 from app.config import get_settings
@@ -84,6 +86,17 @@ async def _generic(_req: Request, exc: Exception) -> JSONResponse:
 app.include_router(router)
 
 
-@app.get("/", tags=["root"])
-async def root():
-    return {"service": "AI Researcher", "docs": "/docs"}
+# ── Frontend (production) ─────────────────────────────────────────────────────
+# In production (Docker / HF Spaces) the built React app is copied to
+# frontend/dist and served by FastAPI itself — same origin, no CORS needed.
+# In local dev, dist/ usually doesn't exist (Vite dev server on :3000 proxies
+# /api instead), so we fall back to a plain JSON root.
+_UI_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if _UI_DIST.is_dir() and (_UI_DIST / "index.html").is_file():
+    # Mounted last: /api, /docs and /redoc are already registered and win.
+    app.mount("/", StaticFiles(directory=str(_UI_DIST), html=True), name="ui")
+else:
+    @app.get("/", tags=["root"])
+    async def root():
+        return {"service": "AI Researcher", "docs": "/docs"}

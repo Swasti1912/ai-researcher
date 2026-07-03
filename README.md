@@ -1,3 +1,15 @@
+---
+title: AI Researcher
+emoji: 📖
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Read papers deeply — AI summary, lessons, PDF-linked Q&A
+---
+
 # AI Researcher – Multi-Agent Research Assistant
 
 Production-grade agentic pipeline built with **LangGraph**, **FastAPI**, and **React**.
