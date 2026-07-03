@@ -3,6 +3,7 @@ import { fetchPaperFromUrl, summarizePaper, askPaper, visualizePaper } from '../
 import ConceptCards from './ConceptCards';
 
 const PaperVisualization = lazy(() => import('./PaperVisualization'));
+const PdfPane = lazy(() => import('./PdfPane'));
 
 const PROC_STEPS = [
   { key: 'fetch',   label: 'Fetching paper',                       sub: 'Downloading from source…' },
@@ -215,7 +216,7 @@ export default function PaperDeepDive({ paper, onClose }) {
           <>
             {/* Sub-tabs */}
             <div className="ddive-tabs">
-              {[['summary', '📋 Summary'], ['visualize', '🗺️ Visualize'], ['qa', '💬 Ask']].map(([k, l]) => (
+              {[['summary', '📋 Summary'], ['pdf', '📄 Paper'], ['visualize', '🗺️ Visualize'], ['qa', '💬 Ask']].map(([k, l]) => (
                 <button key={k} className={`ddive-tab${tab === k ? ' ddive-tab-on' : ''}`} onClick={() => setTab(k)}>{l}</button>
               ))}
             </div>
@@ -281,6 +282,15 @@ export default function PaperDeepDive({ paper, onClose }) {
                     {summary.future_work}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── Paper (PDF) tab ── */}
+            {tab === 'pdf' && (
+              <div className="ddive-body" style={{ padding: 0, height: 'calc(92vh - 210px)' }}>
+                <Suspense fallback={<div style={{ padding: 30, textAlign: 'center', color: 'var(--t2)' }}><span className="spin" /> Loading PDF…</div>}>
+                  <PdfPane sessionId={sessionId} />
+                </Suspense>
               </div>
             )}
 
