@@ -253,7 +253,11 @@ export default function PaperDeepDive({ paper, onClose }) {
                 )}
 
                 {summary.key_concepts?.length > 0 && (
-                  <ConceptCards concepts={summary.key_concepts} onSelect={c => { setTab('qa'); setQuestion(c.name); }} />
+                  <ConceptCards
+                    concepts={summary.key_concepts}
+                    onAsk={(q) => { setTab('qa'); sendQuestion(q); }}
+                    disabled={asking}
+                  />
                 )}
 
                 {summary.section_breakdown?.length > 0 && (
