@@ -188,6 +188,17 @@ class PaperTeachResp(BaseModel):
     how_it_all_fits: str = ""
     paper_in_one_sentence: str = ""
 
+class TeachSectionReq(BaseModel):
+    session_id: str
+    section: str
+    summary: str = ""
+
+class TeachSectionResp(BaseModel):
+    section: str = ""
+    explanation: str = ""
+    figures: List[Dict[str, Any]] = []   # [{fig_id, page, caption, kind}]
+    pages: List[int] = []
+
 class FetchPaperReq(BaseModel):
     url: str = ""        # arXiv abs or PDF URL
     abstract: str = ""   # fallback plain text (for non-arXiv sources)
@@ -597,6 +608,25 @@ async def teach_paper(req: PaperTeachReq):
         return PaperTeachResp(session_id=req.session_id, **lesson)
     except Exception as exc:
         _log.error("Teach error", extra={"err": str(exc)})
+        raise HTTPException(500, str(exc))
+
+
+@router.post("/paper/teach-section", response_model=TeachSectionResp)
+async def teach_section(req: TeachSectionReq):
+    """
+    Extensively teach ONE section of the paper — weaving in its equations
+    (LaTeX) and the figures/tables on that section's pages.
+    """
+    from app.agents.paper_section_teacher import PaperSectionTeacherAgent
+    kb = get_kb()
+    if not kb.get_session_meta(req.session_id):
+        raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+    try:
+        agent = PaperSectionTeacherAgent()
+        result = await agent.teach_section(req.session_id, req.section, req.summary)
+        return TeachSectionResp(**result)
+    except Exception as exc:
+        _log.error("Teach-section error", extra={"err": str(exc)})
         raise HTTPException(500, str(exc))
 
 

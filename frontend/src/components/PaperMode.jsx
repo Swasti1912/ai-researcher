@@ -4,6 +4,7 @@ import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, t
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
+import SectionBreakdown from './SectionBreakdown';
 import Markdown from './Markdown';
 
 // Lazy-loaded: pulls in Mermaid + Recharts only when a visualization is opened.
@@ -411,16 +412,12 @@ export default function PaperMode() {
                   <span style={{ marginLeft: 'auto' }}>{sectionsOpen ? '▴' : '▾'}</span>
                 </button>
                 {sectionsOpen && (
-                  <div className="paper-sections-list">
-                    {summary.section_breakdown.map((s, i) => (
-                      <div key={i} className="paper-section-row paper-section-clickable"
-                        onClick={() => locateInPdf(s.section)}
-                        title="Find this section in the paper">
-                        <div className="paper-section-name">{s.section}</div>
-                        <div className="paper-section-summary">{s.summary}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <SectionBreakdown
+                    sections={summary.section_breakdown}
+                    sessionId={sessionId}
+                    onLocate={locateInPdf}
+                    onLocatePage={locatePage}
+                  />
                 )}
               </div>
             )}

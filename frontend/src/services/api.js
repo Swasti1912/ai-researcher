@@ -32,6 +32,9 @@ export const visualizePaper = (sessionId) =>
 export const teachPaper = (sessionId) =>
   http.post('/paper/teach', { session_id: sessionId }, { timeout: 180_000 }).then(r => r.data);
 
+export const teachSection = (sessionId, section, summary) =>
+  http.post('/paper/teach-section', { session_id: sessionId, section, summary }, { timeout: 120_000 }).then(r => r.data);
+
 export const fetchPaperFromUrl = (url, abstract, title) =>
   http.post('/paper/from-url', { url, abstract, title }, { timeout: 60_000 }).then(r => r.data);
 
