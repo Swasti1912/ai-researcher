@@ -5,7 +5,6 @@ import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, t
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
-import SectionBreakdown from './SectionBreakdown';
 import Library from './Library';
 import HighlightsPanel from './HighlightsPanel';
 import Markdown from './Markdown';
@@ -54,7 +53,6 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [vizData, setVizData]     = useState(null);
   const [vizLoading, setVizLoading] = useState(false);
   const [vizErr, setVizErr]       = useState('');
-  const [sectionsOpen, setSectionsOpen] = useState(false);
   const [teachLesson, setTeachLesson] = useState(null);
   const [teachLoading, setTeachLoading] = useState(false);
   const [teachErr, setTeachErr]   = useState('');
@@ -535,29 +533,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
               </div>
             )}
 
-            {/* Section breakdown — collapsible */}
-            {summary.section_breakdown?.length > 0 && (
-              <div className="paper-sections">
-                <button
-                  className="paper-sections-toggle"
-                  onClick={() => setSectionsOpen(v => !v)}
-                >
-                  <span>📑 Section Breakdown</span>
-                  <span className="paper-sections-count">
-                    {summary.section_breakdown.length} sections
-                  </span>
-                  <span style={{ marginLeft: 'auto' }}>{sectionsOpen ? '▴' : '▾'}</span>
-                </button>
-                {sectionsOpen && (
-                  <SectionBreakdown
-                    sections={summary.section_breakdown}
-                    sessionId={sessionId}
-                    onLocate={locateInPdf}
-                    onLocatePage={locatePage}
-                  />
-                )}
-              </div>
-            )}
+            {/* Section-by-section teaching now lives inside Teach Me (below). */}
 
             {summary.future_work && (
               <div className="paper-future">
