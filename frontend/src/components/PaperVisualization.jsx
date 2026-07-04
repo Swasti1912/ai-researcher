@@ -111,6 +111,7 @@ export default function PaperVisualization({ data, onClose }) {
   const { concept_diagrams = [], equations = [], charts = [] } = data || {};
   const hasCharts = charts.length > 0;
   const hasEquations = equations.length > 0;
+  const isEmpty = concept_diagrams.length === 0 && !hasEquations && !hasCharts;
   const [tab, setTab] = useState('diagrams');
 
   return (
@@ -126,28 +127,43 @@ export default function PaperVisualization({ data, onClose }) {
         {onClose && <button className="btn btn-g viz-close" onClick={onClose}><X size={14} /> Close</button>}
       </div>
 
-      <div className="tabs" style={{ padding: '0 0 4px' }}>
-        <button className={`tb ${tab === 'diagrams' ? 'on' : ''}`} onClick={() => setTab('diagrams')}>
-          <Workflow size={13} style={{ verticalAlign: '-2px' }} /> Diagrams
-          {concept_diagrams.length > 0 && <span className="bdg bdg-b" style={{ marginLeft: 5 }}>{concept_diagrams.length}</span>}
-        </button>
-        {hasEquations && (
-          <button className={`tb ${tab === 'equations' ? 'on' : ''}`} onClick={() => setTab('equations')}>
-            <Sigma size={13} style={{ verticalAlign: '-2px' }} /> Equations
-            <span className="bdg bdg-o" style={{ marginLeft: 5 }}>{equations.length}</span>
-          </button>
-        )}
-        <button className={`tb ${tab === 'charts' ? 'on' : ''}`} onClick={() => setTab('charts')}>
-          <BarChart3 size={13} style={{ verticalAlign: '-2px' }} /> Charts
-          {hasCharts && <span className="bdg bdg-g" style={{ marginLeft: 5 }}>{charts.length}</span>}
-        </button>
-      </div>
+      {isEmpty && (
+        <div className="viz-empty viz-empty-top">
+          <Network size={30} />
+          <div className="viz-empty-title">Nothing to visualize for this paper</div>
+          <div className="viz-empty-sub">
+            It doesn't contain diagrams, workflows, algorithms, or quantitative results to chart.
+            Try <strong>Teach Me</strong> for a section-by-section explanation instead.
+          </div>
+        </div>
+      )}
 
-      <div className="viz-content" style={{ height: 520 }}>
-        {tab === 'diagrams' && <DiagramsView diagrams={concept_diagrams} />}
-        {tab === 'equations' && <EquationsView equations={equations} />}
-        {tab === 'charts' && <ResultsCharts charts={charts} />}
-      </div>
+      {!isEmpty && (
+        <div className="tabs" style={{ padding: '0 0 4px' }}>
+          <button className={`tb ${tab === 'diagrams' ? 'on' : ''}`} onClick={() => setTab('diagrams')}>
+            <Workflow size={13} style={{ verticalAlign: '-2px' }} /> Diagrams
+            {concept_diagrams.length > 0 && <span className="bdg bdg-b" style={{ marginLeft: 5 }}>{concept_diagrams.length}</span>}
+          </button>
+          {hasEquations && (
+            <button className={`tb ${tab === 'equations' ? 'on' : ''}`} onClick={() => setTab('equations')}>
+              <Sigma size={13} style={{ verticalAlign: '-2px' }} /> Equations
+              <span className="bdg bdg-o" style={{ marginLeft: 5 }}>{equations.length}</span>
+            </button>
+          )}
+          <button className={`tb ${tab === 'charts' ? 'on' : ''}`} onClick={() => setTab('charts')}>
+            <BarChart3 size={13} style={{ verticalAlign: '-2px' }} /> Charts
+            {hasCharts && <span className="bdg bdg-g" style={{ marginLeft: 5 }}>{charts.length}</span>}
+          </button>
+        </div>
+      )}
+
+      {!isEmpty && (
+        <div className="viz-content" style={{ height: 520 }}>
+          {tab === 'diagrams' && <DiagramsView diagrams={concept_diagrams} />}
+          {tab === 'equations' && <EquationsView equations={equations} />}
+          {tab === 'charts' && <ResultsCharts charts={charts} />}
+        </div>
+      )}
     </div>
   );
 }

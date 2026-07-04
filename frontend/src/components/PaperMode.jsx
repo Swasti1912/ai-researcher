@@ -606,7 +606,14 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
 
           {/* ── Teacher lesson ── */}
           {teachLesson && (
-            <PaperTeacher lesson={teachLesson} onClose={() => setTeachLesson(null)} />
+            <PaperTeacher
+              lesson={teachLesson}
+              sections={summary?.section_breakdown || []}
+              sessionId={sessionId}
+              onLocate={locateInPdf}
+              onLocatePage={locatePage}
+              onClose={() => setTeachLesson(null)}
+            />
           )}
 
           {/* ── Concept cards ── */}
