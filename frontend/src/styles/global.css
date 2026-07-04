@@ -1,70 +1,74 @@
 /* ═══════════════════════════════════════════════════════════════════════
    AI Researcher — Design System
-   Modern, answer-first. Orange brand · dark + light themes.
-   Font: Sora (display) + Fira Code (mono)
+   "A reading tool, not an explanation tool." Warm paper · teal + amber.
+   Font: Source Serif 4 (display/paper) · IBM Plex Sans (UI) · IBM Plex Mono
+   Light (paper) is the default; dark is a warm-espresso variant.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* ── Dark theme (default) ─────────────────────────────────────────────── */
+/* ── Light theme (default — warm paper) ───────────────────────────────── */
 :root{
   /* surfaces */
-  --bg0:#0a0e17;   /* page */
-  --bg1:#0e1420;   /* header / rails */
-  --bg2:#131a29;   /* cards */
-  --bg3:#1a2336;   /* elevated / insets */
-  --bdr:#212c42;   /* hairline */
-  --bdr2:#2f3d5a;  /* hover hairline */
+  --bg0:#e9e6df;   /* page */
+  --bg1:#faf9f6;   /* header / rails / cards */
+  --bg2:#ffffff;   /* raised cards */
+  --bg3:#f4f1ea;   /* insets / elevated */
+  --bdr:#e7e3da;   /* hairline */
+  --bdr2:#dcd6ca;  /* hover / stronger hairline */
 
-  /* text */
-  --t0:#f3f6fc;
-  --t1:#c3ccdb;
-  --t2:#8492ab;
-  --t3:#586582;
+  /* text (warm ink) */
+  --t0:#35322c;
+  --t1:#4a463e;
+  --t2:#6b665c;
+  --t3:#9a9488;
 
-  /* brand + accents */
-  --orange:#f2822c;   --orange-l:#ff9a4d;  --orange-d:rgba(242,130,44,.12);
-  --green:#2ecc71;    --green-l:#4fe08a;   --green-d:rgba(46,204,113,.12);
-  --blue:#4c8dff;     --blue-l:#77a9ff;    --blue-d:rgba(76,141,255,.12);
-  --red:#f2545b;      --red-d:rgba(242,84,91,.12);
-  --yellow:#e0b23a;   --yellow-d:rgba(224,178,58,.12);
+  /* brand = teal, secondary = amber */
+  --orange:#3f7d78;   --orange-l:#4f938d;  --orange-d:rgba(63,125,120,.10);
+  --amber:#b08a3f;    --amber-l:#c49a4a;   --amber-d:rgba(176,138,63,.12);
+  --green:#4f8a52;    --green-l:#5fa363;   --green-d:rgba(79,138,82,.12);
+  --blue:#3f6f9e;     --blue-l:#5486b8;    --blue-d:rgba(63,111,158,.12);
+  --red:#b5533f;      --red-d:rgba(181,83,63,.12);
+  --yellow:#b08a3f;   --yellow-d:rgba(176,138,63,.12);
 
   /* type */
-  --f:'Sora',system-ui,-apple-system,sans-serif;
-  --m:'Fira Code','SF Mono',Menlo,monospace;
+  --f:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+  --m:'IBM Plex Mono','SF Mono',Menlo,monospace;
 
   /* radii */
-  --r-xl:20px; --r-lg:16px; --r:12px; --rs:9px; --r-xs:6px;
+  --r-xl:20px; --r-lg:18px; --r:12px; --rs:9px; --r-xs:6px;
 
-  /* shadow */
-  --shadow-sm:0 1px 3px rgba(0,0,0,.28);
-  --shadow:0 6px 24px rgba(0,0,0,.32);
-  --shadow-lg:0 20px 60px rgba(0,0,0,.45);
+  /* shadow (warm) */
+  --shadow-sm:0 1px 3px rgba(60,54,40,.08);
+  --shadow:0 8px 30px rgba(60,54,40,.10);
+  --shadow-lg:0 18px 50px rgba(60,54,40,.14);
 
-  --brand-grad:linear-gradient(135deg,var(--orange),#ffb057);
+  --brand-grad:linear-gradient(135deg,var(--orange),#5aa39c);
 }
 
-/* ── Light theme ──────────────────────────────────────────────────────── */
-[data-theme="light"]{
-  --bg0:#f5f6fa;
-  --bg1:#ffffff;
-  --bg2:#ffffff;
-  --bg3:#f2f4f9;
-  --bdr:#e4e8f0;
-  --bdr2:#cfd6e4;
+/* ── Dark theme (warm espresso) ───────────────────────────────────────── */
+[data-theme="dark"]{
+  --bg0:#1c1a16;   /* page */
+  --bg1:#252118;   /* header / rails / cards */
+  --bg2:#2b2720;   /* raised cards */
+  --bg3:#332e25;   /* insets */
+  --bdr:#3a352b;
+  --bdr2:#4a4437;
 
-  --t0:#131824;
-  --t1:#3a4256;
-  --t2:#6b7488;
-  --t3:#9aa2b4;
+  --t0:#f2efe6;
+  --t1:#d8d3c6;
+  --t2:#a59d8c;
+  --t3:#7c7565;
 
-  --orange:#e0741a;   --orange-l:#f2822c;  --orange-d:rgba(224,116,26,.10);
-  --green:#16a34a;    --green-l:#22c55e;   --green-d:rgba(22,163,74,.10);
-  --blue:#2563eb;     --blue-l:#4c8dff;    --blue-d:rgba(37,99,235,.10);
-  --red:#dc2626;      --red-d:rgba(220,38,38,.10);
-  --yellow:#ca8a04;   --yellow-d:rgba(202,138,4,.10);
+  --orange:#6bb2ab;   --orange-l:#84c5be;  --orange-d:rgba(107,178,171,.14);
+  --amber:#d0a659;    --amber-l:#dcb86f;   --amber-d:rgba(208,166,89,.16);
+  --green:#7fbf83;    --green-l:#93cf97;   --green-d:rgba(127,191,131,.14);
+  --blue:#7aa6d6;     --blue-l:#93b9e2;    --blue-d:rgba(122,166,214,.14);
+  --red:#e08a76;      --red-d:rgba(224,138,118,.14);
+  --yellow:#d0a659;   --yellow-d:rgba(208,166,89,.16);
 
-  --shadow-sm:0 1px 3px rgba(20,30,60,.06);
-  --shadow:0 8px 28px rgba(20,30,60,.08);
-  --shadow-lg:0 24px 60px rgba(20,30,60,.14);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.35);
+  --shadow:0 8px 28px rgba(0,0,0,.40);
+  --shadow-lg:0 20px 55px rgba(0,0,0,.55);
 }
 
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -78,6 +82,12 @@ body{
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--t3);background-clip:padding-box}
+
+/* ── Serif display type (scholarly headings + paper text) ─────────────── */
+.hero-title,.answer-head h2,.answer-card .md h1,.answer-card .md h2,
+.paper-title,.library-card-title,.concept-name,.brand,
+.paper-proc-name,.section-teach-badge{font-family:var(--serif)}
+.hero-title{font-weight:600}
 
 ::selection{background:var(--orange-d);color:var(--orange-l)}
 
