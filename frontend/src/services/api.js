@@ -48,6 +48,9 @@ export const getPaperFigures = (sessionId) =>
 export const paperFigureUrl = (sessionId, figId) => `/api/paper/figure/${sessionId}/${figId}`;
 export const paperPdfUrl = (sessionId) => `/api/paper/pdf/${sessionId}`;
 
+// Runtime flags (e.g. whether the shared Library is enabled on this deployment)
+export const getConfig = () => http.get('/config').then(r => r.data);
+
 // Library + persistence (P2)
 export const getLibrary = () => http.get('/paper/library').then(r => r.data);
 export const getPaperMeta = (sessionId) => http.get(`/paper/${sessionId}`).then(r => r.data);

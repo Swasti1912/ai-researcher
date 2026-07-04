@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink, ArrowLeft } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper, fetchPaperFromUrl,
-  getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
+  getConfig, getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
@@ -37,6 +37,7 @@ const DEPTH_COLORS = { beginner: 'bdg-g', intermediate: 'bdg-o', expert: 'bdg-r'
 export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [phase, setPhase]         = useState('upload'); // upload | processing | ready
   const [sessionId, setSessionId] = useState(null);
+  const [libraryEnabled, setLibraryEnabled] = useState(true);  // shared Library/persistence (off in public deploy)
   const [openErr, setOpenErr]     = useState(null);     // { message, url, title } for inaccessible from-URL papers
   const [filename, setFilename]   = useState('');
   const [summary, setSummary]     = useState(null);
@@ -145,6 +146,11 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
       setPhase('upload');
     }
   };
+
+  // Whether this deployment exposes the shared Library / persistence.
+  useEffect(() => {
+    getConfig().then(c => setLibraryEnabled(c.library_enabled !== false)).catch(() => {});
+  }, []);
 
   const openTokenRef = useRef(null);
   useEffect(() => {
@@ -361,8 +367,8 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
         </div>
       )}
 
-      {/* ── Library of saved papers ── */}
-      {phase === 'upload' && !pendingSummarize && (
+      {/* ── Library of saved papers (hidden when persistence is off) ── */}
+      {libraryEnabled && phase === 'upload' && !pendingSummarize && (
         <Library onOpen={reopenPaper} refreshKey={libraryKey} />
       )}
 
@@ -457,10 +463,10 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
                 <Suspense fallback={<PdfFallback />}>
                   <PdfPane
                     apiRef={pdfPaneRef} file={paperFile} sessionId={sessionId}
-                    highlights={highlights}
-                    onCreateHighlight={handleCreateHighlight}
-                    onUpdateNote={handleUpdateNote}
-                    onDeleteHighlight={handleDeleteHighlight}
+                    highlights={libraryEnabled ? highlights : []}
+                    onCreateHighlight={libraryEnabled ? handleCreateHighlight : undefined}
+                    onUpdateNote={libraryEnabled ? handleUpdateNote : undefined}
+                    onDeleteHighlight={libraryEnabled ? handleDeleteHighlight : undefined}
                   />
                 </Suspense>
               </div>
@@ -564,8 +570,8 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
           {/* ── Figures & tables (P1) ── */}
           <FiguresStrip sessionId={sessionId} onLocate={locatePage} />
 
-          {/* ── Highlights & notes (P2) ── */}
-          {hasPdf && (
+          {/* ── Highlights & notes (P2; hidden when persistence is off) ── */}
+          {libraryEnabled && hasPdf && (
             <HighlightsPanel
               highlights={highlights}
               onOpen={(id) => pdfPaneRef.current?.scrollToHighlight?.(id)}

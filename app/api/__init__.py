@@ -25,6 +25,7 @@ from app.agents.paper_summarizer import PaperSummarizerAgent
 from app.agents.paper_qa import PaperQAAgent
 from app.agents.paper_visualizer import PaperVisualizerAgent
 from app.agents.paper_teacher import PaperTeacherAgent
+from app.config import get_settings
 from app.graph import get_graph
 from app.knowledge_base import get_kb
 from app.state import ResearchState
@@ -479,7 +480,14 @@ async def get_result(request_id: str):
 
 
 async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: str) -> None:
-    """Save a freshly-ingested paper to persistent storage and mark it persisted."""
+    """Save a freshly-ingested paper to persistent storage and mark it persisted.
+
+    No-op when the Library is disabled (single-tenant deployment): papers then
+    live only in the caller's in-memory session and are never written to the
+    shared store, so visitors can't see each other's uploads.
+    """
+    if not get_settings().enable_library:
+        return
     try:
         from app import storage
         kb = get_kb()
@@ -613,11 +621,12 @@ async def summarize_paper(req: PaperSummarizeReq):
         if meta is not None:
             meta["summary"] = summary
         # Persist the summary (title + body) so the library + reopen show it.
-        try:
-            from app import storage
-            await asyncio.to_thread(lambda: storage.update_summary(req.session_id, summary))
-        except Exception as exc:
-            _log.warning("persist summary failed", extra={"err": str(exc)})
+        if get_settings().enable_library:
+            try:
+                from app import storage
+                await asyncio.to_thread(lambda: storage.update_summary(req.session_id, summary))
+            except Exception as exc:
+                _log.warning("persist summary failed", extra={"err": str(exc)})
         return PaperSummarizeResp(
             session_id=req.session_id,
             doc_id=doc_id,
@@ -645,14 +654,15 @@ async def ask_paper(req: PaperAskReq):
         agent = PaperQAAgent()
         result = await agent.answer(question=req.question, session_id=req.session_id)
         # Persist both turns so chat history survives restart / reopen.
-        try:
-            from app import storage
-            sid = req.session_id
-            await asyncio.to_thread(lambda: storage.append_chat(sid, "user", req.question))
-            await asyncio.to_thread(lambda: storage.append_chat(
-                sid, "assistant", result.get("answer", ""), evidence=result.get("paper_evidence")))
-        except Exception as exc:
-            _log.warning("persist chat failed", extra={"err": str(exc)})
+        if get_settings().enable_library:
+            try:
+                from app import storage
+                sid = req.session_id
+                await asyncio.to_thread(lambda: storage.append_chat(sid, "user", req.question))
+                await asyncio.to_thread(lambda: storage.append_chat(
+                    sid, "assistant", result.get("answer", ""), evidence=result.get("paper_evidence")))
+            except Exception as exc:
+                _log.warning("persist chat failed", extra={"err": str(exc)})
         return PaperAskResp(question=req.question, **result)
     except Exception as exc:
         _log.error("PaperAsk error", extra={"err": str(exc)})
@@ -849,8 +859,16 @@ async def cleanup_sessions():
 # BEFORE the greedy GET /paper/{session_id} (declared last), or e.g. /paper/library
 # would be captured as session_id="library".
 
+@router.get("/config")
+async def client_config():
+    """Runtime flags the frontend needs — e.g. whether to show the Library."""
+    return {"library_enabled": get_settings().enable_library}
+
+
 @router.get("/paper/library", response_model=LibraryResp)
 async def paper_library():
+    if not get_settings().enable_library:
+        return LibraryResp(papers=[])
     from app import storage
     papers = await asyncio.to_thread(storage.list_papers)
     return LibraryResp(papers=[LibraryItem(**{**p, "has_pdf": bool(p.get("has_pdf")),
