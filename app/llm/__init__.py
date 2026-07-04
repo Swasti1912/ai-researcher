@@ -96,3 +96,14 @@ def make_agent_llm(agent: str, temperature: Optional[float] = None, max_tokens: 
 
 # Alias used by app/agents/base.py
 create_agent_llm = make_agent_llm
+
+
+def fallback_active() -> bool:
+    """True when the Gemini fallback is usable (key set + package importable)."""
+    if not get_settings().google_api_key:
+        return False
+    try:
+        import langchain_google_genai  # noqa: F401
+        return True
+    except ImportError:
+        return False

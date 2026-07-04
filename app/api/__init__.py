@@ -380,7 +380,7 @@ async def explain_subquestion(req: SubQuestionReq):
     try:
         answer = await agent.call_llm(prompt)
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
     return SubQuestionResp(question=req.question, answer=answer, papers=papers[:6])
 
@@ -418,7 +418,7 @@ async def run_research(req: ResearchReq):
         raise HTTPException(exc.status_code, exc.message)
     except Exception as exc:
         _log.error("Pipeline error", extra={"err": str(exc), "tb": traceback.format_exc()})
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
 
 @router.post("/research/stream")
@@ -635,7 +635,7 @@ async def summarize_paper(req: PaperSummarizeReq):
         )
     except Exception as exc:
         _log.error("Summarize error", extra={"err": str(exc)})
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
 
 @router.post("/paper/ask", response_model=PaperAskResp)
@@ -666,7 +666,7 @@ async def ask_paper(req: PaperAskReq):
         return PaperAskResp(question=req.question, **result)
     except Exception as exc:
         _log.error("PaperAsk error", extra={"err": str(exc)})
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
 
 @router.post("/paper/visualize", response_model=PaperVisualizeResp)
@@ -685,8 +685,9 @@ async def visualize_paper(req: PaperVisualizeReq):
         result = await agent.visualize(session_id=req.session_id)
         return PaperVisualizeResp(session_id=req.session_id, **result)
     except Exception as exc:
-        _log.error("Visualize error", extra={"err": str(exc)})
-        raise HTTPException(500, str(exc))
+        detail = getattr(exc, "detail", None) or str(exc)
+        _log.error("Visualize error", extra={"err": detail})
+        raise HTTPException(500, detail)
 
 
 @router.post("/paper/teach", response_model=PaperTeachResp)
@@ -712,7 +713,7 @@ async def teach_paper(req: PaperTeachReq):
         return PaperTeachResp(session_id=req.session_id, **lesson)
     except Exception as exc:
         _log.error("Teach error", extra={"err": str(exc)})
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
 
 @router.post("/paper/teach-section", response_model=TeachSectionResp)
@@ -731,7 +732,7 @@ async def teach_section(req: TeachSectionReq):
         return TeachSectionResp(**result)
     except Exception as exc:
         _log.error("Teach-section error", extra={"err": str(exc)})
-        raise HTTPException(500, str(exc))
+        raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
 
 
 @router.post("/paper/from-url", response_model=UploadResp)
@@ -862,7 +863,13 @@ async def cleanup_sessions():
 @router.get("/config")
 async def client_config():
     """Runtime flags the frontend needs — e.g. whether to show the Library."""
-    return {"library_enabled": get_settings().enable_library}
+    from app.llm import fallback_active
+    s = get_settings()
+    return {
+        "library_enabled": s.enable_library,
+        "llm_model": s.llm_model,
+        "gemini_fallback": fallback_active(),
+    }
 
 
 @router.get("/paper/library", response_model=LibraryResp)
