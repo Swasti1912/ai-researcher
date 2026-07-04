@@ -872,6 +872,29 @@ async def client_config():
     }
 
 
+@router.get("/llm-selftest")
+async def llm_selftest():
+    """Diagnostic: call Groq and Gemini directly (tiny prompt) with the live
+    keys and report each one's success/error. Reveals why the fallback fails."""
+    from app.llm import _build_groq, _build_gemini
+    out: Dict[str, Any] = {}
+    try:
+        r = await _build_groq(None, 8).ainvoke("Say hi")
+        out["groq"] = {"ok": True, "sample": (r.content or "")[:40]}
+    except Exception as e:  # noqa: BLE001
+        out["groq"] = {"ok": False, "error": str(e)[:400]}
+    try:
+        gm = _build_gemini(None, 8)
+        if gm is None:
+            out["gemini"] = {"ok": False, "error": "not configured (no key / package)"}
+        else:
+            r = await gm.ainvoke("Say hi")
+            out["gemini"] = {"ok": True, "sample": (r.content or "")[:40]}
+    except Exception as e:  # noqa: BLE001
+        out["gemini"] = {"ok": False, "error": str(e)[:400]}
+    return out
+
+
 @router.get("/paper/library", response_model=LibraryResp)
 async def paper_library():
     if not get_settings().enable_library:
