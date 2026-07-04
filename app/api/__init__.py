@@ -17,7 +17,7 @@ import json
 import traceback
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -479,22 +479,33 @@ async def get_result(request_id: str):
     return ResearchResp(**s)
 
 
-async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: str) -> None:
+def _library_on() -> bool:
+    """Persistence/Library is active when auth gates the app (per-user) or the
+    single-tenant ENABLE_LIBRARY flag is set."""
+    s = get_settings()
+    return s.auth_enabled or s.enable_library
+
+
+async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: str,
+                         owner: str = "public") -> None:
     """Save a freshly-ingested paper to persistent storage and mark it persisted.
 
     No-op when the Library is disabled (single-tenant deployment): papers then
     live only in the caller's in-memory session and are never written to the
     shared store, so visitors can't see each other's uploads.
     """
-    if not get_settings().enable_library:
+    kb = get_kb()
+    meta = kb.get_session_meta(session_id)
+    if meta is not None:
+        meta["owner"] = owner   # always tag the in-memory session for scoping
+    if not _library_on():
         return
     try:
         from app import storage
-        kb = get_kb()
-        meta = kb.get_session_meta(session_id) or {}
+        meta = meta or {}
         figs = meta.get("figures", [])
         await asyncio.to_thread(
-            lambda: storage.save_paper(session_id, {**meta, "source": source},
+            lambda: storage.save_paper(session_id, {**meta, "source": source, "owner": owner},
                                        pdf_bytes=pdf_bytes, figures=figs)
         )
         meta["persisted"] = True   # protect from the in-memory TTL cleanup
@@ -503,7 +514,7 @@ async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: st
 
 
 @router.post("/upload-paper", response_model=UploadResp)
-async def upload_paper(file: UploadFile = File(...)):
+async def upload_paper(request: Request, file: UploadFile = File(...)):
     """
     Extract text from PDF/TXT, embed into Qdrant, return a session_id.
 
@@ -542,7 +553,9 @@ async def upload_paper(file: UploadFile = File(...)):
         )
         text_len, preview, page_count, figure_count = len(text), text[:500], 0, 0
 
-    await _persist_paper(session_id, content if filename.lower().endswith(".pdf") else None, "upload")
+    from app.auth import require_owner
+    await _persist_paper(session_id, content if filename.lower().endswith(".pdf") else None,
+                         "upload", owner=require_owner(request))
 
     meta = kb.get_session_meta(session_id) or {}
     return UploadResp(
@@ -621,7 +634,7 @@ async def summarize_paper(req: PaperSummarizeReq):
         if meta is not None:
             meta["summary"] = summary
         # Persist the summary (title + body) so the library + reopen show it.
-        if get_settings().enable_library:
+        if _library_on():
             try:
                 from app import storage
                 await asyncio.to_thread(lambda: storage.update_summary(req.session_id, summary))
@@ -654,7 +667,7 @@ async def ask_paper(req: PaperAskReq):
         agent = PaperQAAgent()
         result = await agent.answer(question=req.question, session_id=req.session_id)
         # Persist both turns so chat history survives restart / reopen.
-        if get_settings().enable_library:
+        if _library_on():
             try:
                 from app import storage
                 sid = req.session_id
@@ -736,7 +749,7 @@ async def teach_section(req: TeachSectionReq):
 
 
 @router.post("/paper/from-url", response_model=UploadResp)
-async def paper_from_url(req: FetchPaperReq):
+async def paper_from_url(req: FetchPaperReq, request: Request):
     """
     Fetch a paper by URL (arXiv abs/PDF) or use supplied abstract text.
     Extracts text, embeds into Qdrant, returns a session_id exactly like
@@ -809,7 +822,8 @@ async def paper_from_url(req: FetchPaperReq):
                 )
             )
             _log.info("Ingested external PDF", extra={"title": title, "session_id": session_id})
-            await _persist_paper(session_id, pdf_bytes, "url")
+            from app.auth import require_owner
+            await _persist_paper(session_id, pdf_bytes, "url", owner=require_owner(request))
             meta = kb.get_session_meta(session_id) or {}
             return UploadResp(
                 session_id=session_id, doc_id=doc_id, filename=filename,
@@ -823,7 +837,8 @@ async def paper_from_url(req: FetchPaperReq):
         text = req.abstract
         filename = filename.replace(".pdf", ".txt")
         session_id, doc_id = await asyncio.to_thread(lambda: kb.ingest(text=text, filename=filename))
-        await _persist_paper(session_id, None, "url")
+        from app.auth import require_owner
+        await _persist_paper(session_id, None, "url", owner=require_owner(request))
         meta = kb.get_session_meta(session_id) or {}
         return UploadResp(
             session_id=session_id, doc_id=doc_id, filename=filename,
@@ -867,7 +882,8 @@ async def client_config():
     s = get_settings()
     chain = provider_chain()
     return {
-        "library_enabled": s.enable_library,
+        "library_enabled": _library_on(),
+        "auth_enabled": s.auth_enabled,
         "llm_providers": chain,          # e.g. ["openai","groq","gemini"] in fallback order
         "llm_primary": chain[0] if chain else None,
     }
@@ -894,11 +910,14 @@ async def llm_selftest():
 
 
 @router.get("/paper/library", response_model=LibraryResp)
-async def paper_library():
-    if not get_settings().enable_library:
+async def paper_library(request: Request):
+    if not _library_on():
         return LibraryResp(papers=[])
     from app import storage
-    papers = await asyncio.to_thread(storage.list_papers)
+    from app.auth import owner_id
+    # Auth on → scope to the logged-in user; auth off → the shared "public" set.
+    owner = owner_id(request) if get_settings().auth_enabled else None
+    papers = await asyncio.to_thread(lambda: storage.list_papers(owner))
     return LibraryResp(papers=[LibraryItem(**{**p, "has_pdf": bool(p.get("has_pdf")),
                                               "has_summary": bool(p.get("has_summary"))}) for p in papers])
 

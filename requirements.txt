@@ -17,3 +17,5 @@ sentence-transformers
 qdrant_client
 langchain_groq
 langchain-google-genai>=2.0.0
+authlib>=1.3.0
+itsdangerous>=2.2.0

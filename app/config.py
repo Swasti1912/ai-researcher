@@ -42,6 +42,21 @@ class Settings(BaseSettings):
     # exists. Local dev keeps it on. Set ENABLE_LIBRARY=false in production.
     enable_library: bool = True
 
+    # Auth (Google OAuth / OIDC). Auth is ACTIVE only when a client id is set —
+    # so local dev runs open, and the deployment gates the whole app behind
+    # login. Each logged-in user gets a private, session-scoped library that is
+    # wiped on logout.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    session_secret: str = "dev-insecure-session-secret-change-me"
+    # Public base URL for OAuth callbacks (e.g. https://<space>.hf.space).
+    # Needed because HF's proxy hides the external scheme/host from the app.
+    oauth_redirect_base: str = ""
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
+
     # External APIs
     semantic_scholar_api_key: str = ""
     arxiv_base_url: str = "https://export.arxiv.org/api/query"

@@ -78,7 +78,8 @@ def init_db() -> None:
               summary_json TEXT,
               full_text    TEXT,
               pdf_path     TEXT,
-              source       TEXT
+              source       TEXT,
+              owner        TEXT DEFAULT 'public'
             );
             CREATE TABLE IF NOT EXISTS figures(
               session_id TEXT, fig_id TEXT, page INTEGER,
@@ -100,6 +101,11 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_hl_sid   ON highlights(session_id);
             """
         )
+        # Migrate older DBs that predate the owner column.
+        cols = {r[1] for r in _conn.execute("PRAGMA table_info(papers)")}
+        if "owner" not in cols:
+            _conn.execute("ALTER TABLE papers ADD COLUMN owner TEXT DEFAULT 'public'")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_owner ON papers(owner)")
         _conn.commit()
         _log.info("Storage ready", extra={"db": str(_db_path())})
 
@@ -144,13 +150,14 @@ def save_paper(session_id: str, meta: Dict[str, Any],
         c.execute(
             """INSERT OR REPLACE INTO papers(session_id, doc_id, filename, title,
                  page_count, figure_count, chunk_count, created_at, summary_json,
-                 full_text, pdf_path, source)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 full_text, pdf_path, source, owner)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (session_id, meta.get("doc_id"), meta.get("filename"),
              meta.get("title") or "", meta.get("page_count", 0), len(figures),
              meta.get("chunk_count", 0), meta.get("created_at") or time.time(),
              json.dumps(meta["summary"]) if meta.get("summary") else None,
-             meta.get("text") or "", pdf_path, meta.get("source", "upload")),
+             meta.get("text") or "", pdf_path, meta.get("source", "upload"),
+             meta.get("owner") or "public"),
         )
         c.execute("DELETE FROM figures WHERE session_id=?", (session_id,))
         c.executemany(
@@ -169,16 +176,34 @@ def update_summary(session_id: str, summary: Dict[str, Any]) -> None:
         _c().commit()
 
 
-def list_papers() -> List[Dict[str, Any]]:
+def list_papers(owner: Optional[str] = None) -> List[Dict[str, Any]]:
+    cols = """session_id, doc_id, filename, title, page_count, figure_count,
+              chunk_count, created_at, source,
+              (summary_json IS NOT NULL) AS has_summary,
+              (pdf_path IS NOT NULL) AS has_pdf"""
     with _lock:
-        rows = _c().execute(
-            """SELECT session_id, doc_id, filename, title, page_count, figure_count,
-                      chunk_count, created_at, source,
-                      (summary_json IS NOT NULL) AS has_summary,
-                      (pdf_path IS NOT NULL) AS has_pdf
-               FROM papers ORDER BY created_at DESC"""
-        ).fetchall()
+        if owner is None:
+            rows = _c().execute(f"SELECT {cols} FROM papers ORDER BY created_at DESC").fetchall()
+        else:
+            rows = _c().execute(
+                f"SELECT {cols} FROM papers WHERE owner=? ORDER BY created_at DESC", (owner,),
+            ).fetchall()
     return [dict(r) for r in rows]
+
+
+def delete_by_owner(owner: str) -> int:
+    """Delete every paper (rows + files) owned by *owner*. Returns count."""
+    import shutil
+    with _lock:
+        sids = [r[0] for r in _c().execute("SELECT session_id FROM papers WHERE owner=?", (owner,)).fetchall()]
+        c = _c()
+        for sid in sids:
+            for tbl in ("papers", "figures", "chat", "highlights"):
+                c.execute(f"DELETE FROM {tbl} WHERE session_id=?", (sid,))
+        c.commit()
+    for sid in sids:
+        shutil.rmtree(_paper_dir(sid), ignore_errors=True)
+    return len(sids)
 
 
 def get_paper(session_id: str) -> Optional[Dict[str, Any]]:

@@ -71,6 +71,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Signed session cookie — powers Google OAuth login + per-user library scoping.
+# https_only is on in the deployment (served over HTTPS); off for local http.
+from starlette.middleware.sessions import SessionMiddleware  # noqa: E402
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=s.session_secret,
+    same_site="lax",
+    https_only=bool(s.oauth_redirect_base.startswith("https")),
+    max_age=60 * 60 * 12,   # 12h session
+)
+
 
 @app.exception_handler(AIResearcherError)
 async def _app_err(_req: Request, exc: AIResearcherError) -> JSONResponse:
@@ -83,6 +94,8 @@ async def _generic(_req: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(content={"error": "InternalError", "message": str(exc)}, status_code=500)
 
 
+from app.auth import auth_router  # noqa: E402
+app.include_router(auth_router)
 app.include_router(router)
 
 

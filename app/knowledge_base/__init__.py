@@ -335,6 +335,18 @@ class KnowledgeBase:
         _log.info("Session deleted", extra={"session_id": session_id, "chunks": chunk_count})
         return chunk_count
 
+    def delete_by_owner(self, owner: str) -> int:
+        """Delete every in-memory session owned by *owner*. Returns count."""
+        if not owner:
+            return 0
+        sids = [sid for sid, m in list(_sessions.items()) if m.get("owner") == owner]
+        for sid in sids:
+            try:
+                self.delete_session(sid)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("delete_by_owner failed", extra={"session_id": sid, "err": str(exc)})
+        return len(sids)
+
     def cleanup_old_sessions(self) -> int:
         """
         Evict stale sessions older than ``session_max_age_hours``.
