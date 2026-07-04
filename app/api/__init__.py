@@ -863,12 +863,13 @@ async def cleanup_sessions():
 @router.get("/config")
 async def client_config():
     """Runtime flags the frontend needs — e.g. whether to show the Library."""
-    from app.llm import fallback_active
+    from app.llm import provider_chain
     s = get_settings()
+    chain = provider_chain()
     return {
         "library_enabled": s.enable_library,
-        "llm_model": s.llm_model,
-        "gemini_fallback": fallback_active(),
+        "llm_providers": chain,          # e.g. ["openai","groq","gemini"] in fallback order
+        "llm_primary": chain[0] if chain else None,
     }
 
 
@@ -876,22 +877,19 @@ async def client_config():
 async def llm_selftest():
     """Diagnostic: call Groq and Gemini directly (tiny prompt) with the live
     keys and report each one's success/error. Reveals why the fallback fails."""
-    from app.llm import _build_groq, _build_gemini
+    from app.llm import _build_openai, _build_groq, _build_gemini
+    builders = {"openai": _build_openai, "groq": _build_groq, "gemini": _build_gemini}
     out: Dict[str, Any] = {}
-    try:
-        r = await _build_groq(None, 8).ainvoke("Say hi")
-        out["groq"] = {"ok": True, "sample": (r.content or "")[:40]}
-    except Exception as e:  # noqa: BLE001
-        out["groq"] = {"ok": False, "error": str(e)[:400]}
-    try:
-        gm = _build_gemini(None, 8)
-        if gm is None:
-            out["gemini"] = {"ok": False, "error": "not configured (no key / package)"}
-        else:
-            r = await gm.ainvoke("Say hi")
-            out["gemini"] = {"ok": True, "sample": (r.content or "")[:40]}
-    except Exception as e:  # noqa: BLE001
-        out["gemini"] = {"ok": False, "error": str(e)[:400]}
+    for name, build in builders.items():
+        try:
+            llm = build(None, 8)
+            if llm is None:
+                out[name] = {"ok": False, "error": "not configured (no key / package)"}
+                continue
+            r = await llm.ainvoke("Say hi")
+            out[name] = {"ok": True, "sample": (r.content or "")[:40]}
+        except Exception as e:  # noqa: BLE001
+            out[name] = {"ok": False, "error": str(e)[:400]}
     return out
 
 

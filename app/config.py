@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4000
 
+    # OpenAI — preferred primary when set (funded key → no free-tier daily wall,
+    # high concurrency). Falls back to Groq then Gemini.
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+
     # Gemini fallback — used automatically when a Groq call fails (rate limit,
     # bad key, timeout). Inactive unless google_api_key is set.
     google_api_key: str = ""
