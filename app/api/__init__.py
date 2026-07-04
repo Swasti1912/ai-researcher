@@ -918,19 +918,41 @@ async def remove_highlight(highlight_id: str):
 
 @router.get("/paper/{session_id}", response_model=ReopenResp)
 async def reopen_paper(session_id: str):
-    """Reopen a persisted paper: returns its metadata + cached summary."""
+    """
+    Reopen a paper's metadata + cached summary.
+
+    Prefers the persistent store, but falls back to the live in-memory session
+    when the paper was never persisted — e.g. ENABLE_LIBRARY=false (deploy mode),
+    where the research "Summarize & visualize" flow ingests a paper into memory
+    only and then reopens it here.
+    """
     from app import storage
     row = await asyncio.to_thread(lambda: storage.get_paper(session_id))
-    if not row:
+    if row:
+        if not get_kb().get_session_meta(session_id):
+            await asyncio.to_thread(get_kb().load_index)
+        return ReopenResp(
+            session_id=session_id, filename=row.get("filename"), title=row.get("title") or "",
+            page_count=row.get("page_count", 0), figure_count=row.get("figure_count", 0),
+            created_at=row.get("created_at", 0.0), has_pdf=bool(row.get("pdf_path")),
+            summary=row.get("summary"),
+        )
+
+    # Fallback: the in-memory session (not persisted).
+    meta = get_kb().get_session_meta(session_id)
+    if not meta:
         raise HTTPException(404, f"Paper '{session_id}' not found")
-    # Ensure it's in the in-memory index (load_index runs at startup; belt-and-suspenders).
-    if not get_kb().get_session_meta(session_id):
-        await asyncio.to_thread(get_kb().load_index)
+    summary = meta.get("summary")
+    title = summary.get("title", "") if isinstance(summary, dict) else ""
     return ReopenResp(
-        session_id=session_id, filename=row.get("filename"), title=row.get("title") or "",
-        page_count=row.get("page_count", 0), figure_count=row.get("figure_count", 0),
-        created_at=row.get("created_at", 0.0), has_pdf=bool(row.get("pdf_path")),
-        summary=row.get("summary"),
+        session_id=session_id,
+        filename=meta.get("filename"),
+        title=title,
+        page_count=meta.get("page_count", 0),
+        figure_count=len(meta.get("figures") or []),
+        created_at=meta.get("created_at", 0.0),
+        has_pdf=bool(meta.get("pdf_bytes")) and meta.get("page_count", 0) > 0,
+        summary=summary,
     )
 
 
