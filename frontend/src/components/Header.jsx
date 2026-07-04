@@ -1,7 +1,7 @@
 import React from 'react';
-import { FlaskConical, FileText, Sun, Moon } from 'lucide-react';
+import { FlaskConical, FileText, Sun, Moon, LogOut } from 'lucide-react';
 
-export default function Header({ mode, onModeChange, theme, onThemeToggle }) {
+export default function Header({ mode, onModeChange, theme, onThemeToggle, user, onLogout }) {
   const isDark = theme === 'dark';
   return (
     <header className="hdr">
@@ -27,6 +27,17 @@ export default function Header({ mode, onModeChange, theme, onThemeToggle }) {
         >
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
         </button>
+
+        {user && (
+          <div className="hdr-user">
+            {user.picture
+              ? <img className="hdr-avatar" src={user.picture} alt="" referrerPolicy="no-referrer" />
+              : <div className="hdr-avatar hdr-avatar-fb">{(user.name || user.email || '?').slice(0, 1).toUpperCase()}</div>}
+            <button className="icon-btn" onClick={onLogout} title={`Log out (${user.email || ''})`}>
+              <LogOut size={16} />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

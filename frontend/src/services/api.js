@@ -1,5 +1,11 @@
 import axios from 'axios';
-const http = axios.create({ baseURL: '/api', timeout: 200_000 });
+// withCredentials so the signed session cookie (login) rides along.
+const http = axios.create({ baseURL: '/api', timeout: 200_000, withCredentials: true });
+
+// Auth
+export const getAuth = () => http.get('/auth/me').then(r => r.data);
+export const logout = () => http.post('/auth/logout').then(r => r.data);
+export const loginUrl = (provider = 'google') => `/api/auth/login/${provider}`;
 
 export const submitResearch = (query, paperText, paperFilename, maxIterations = 3) =>
   http.post('/research', { query, paper_text: paperText, paper_filename: paperFilename, max_iterations: maxIterations }).then(r => r.data);

@@ -5,7 +5,8 @@ import QueryInput from './components/QueryInput';
 import Results from './components/Results';
 import Sidebar from './components/Sidebar';
 import PaperMode from './components/PaperMode';
-import { submitResearch, uploadPaper } from './services/api';
+import Login from './components/Login';
+import { submitResearch, uploadPaper, getAuth, logout } from './services/api';
 
 const STEPS = [
   { key: 'orchestrator', label: 'Orchestrator' },
@@ -31,6 +32,10 @@ export default function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+
+  const [auth, setAuth]           = useState(null);   // null=loading; {auth_enabled, authenticated, user}
+  useEffect(() => { getAuth().then(setAuth).catch(() => setAuth({ auth_enabled: false, authenticated: true })); }, []);
+  const doLogout = async () => { try { await logout(); } catch { /* ignore */ } setAuth(a => ({ ...a, authenticated: false, user: null })); };
 
   const [mode, setMode]           = useState('research');
   const [query, setQuery]         = useState('');
@@ -89,9 +94,18 @@ export default function App() {
 
   const showHero = mode === 'research' && !result && !loading && !error;
 
+  // Auth gate — whole app behind login when auth is enabled server-side.
+  if (auth === null) {
+    return <div className="app-loading"><span className="spin" /></div>;
+  }
+  if (auth.auth_enabled && !auth.authenticated) {
+    return <Login error={new URLSearchParams(window.location.search).has('auth_error')} />;
+  }
+
   return (
     <div className="app">
-      <Header mode={mode} onModeChange={setMode} theme={theme} onThemeToggle={toggleTheme} />
+      <Header mode={mode} onModeChange={setMode} theme={theme} onThemeToggle={toggleTheme}
+        user={auth.user} onLogout={doLogout} />
 
       {mode === 'research' ? (
         <div className={`body ${!result ? 'body-full' : ''}`}>
