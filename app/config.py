@@ -20,12 +20,22 @@ class Settings(BaseSettings):
         case_sensitive=False, extra="ignore",
     )
 
-    # LLM provider — Groq only
+    # LLM provider — Groq primary, optional Gemini fallback
     llm_provider: str = "groq"
     groq_api_key: str = ""
     llm_model: str = "llama-3.3-70b-versatile"   # Groq-hosted model
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4000
+
+    # Gemini fallback — used automatically when a Groq call fails (rate limit,
+    # bad key, timeout). Inactive unless google_api_key is set.
+    google_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
+    # Feature flags. Persistence/Library is shared across all visitors on a
+    # single-tenant deployment, so it's disabled there until per-user auth
+    # exists. Local dev keeps it on. Set ENABLE_LIBRARY=false in production.
+    enable_library: bool = True
 
     # External APIs
     semantic_scholar_api_key: str = ""

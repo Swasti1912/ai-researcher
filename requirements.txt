@@ -16,3 +16,4 @@ sse-starlette>=2.0.0
 sentence-transformers
 qdrant_client
 langchain_groq
+langchain-google-genai>=2.0.0
