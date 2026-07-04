@@ -109,8 +109,7 @@ export default function App() {
               )}
 
               <QueryInput
-                query={query} setQuery={setQuery} onSubmit={runQuery}
-                onUpload={handleUpload} onClearPaper={clearPaper} paper={paper} loading={loading}
+                query={query} setQuery={setQuery} onSubmit={runQuery} loading={loading}
               />
 
               {showHero && (
