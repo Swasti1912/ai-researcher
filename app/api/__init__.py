@@ -395,6 +395,12 @@ async def health():
 async def run_research(req: ResearchReq):
     """Synchronously run the full pipeline and return the result."""
     _log.info("Research request", extra={"q_len": len(req.query)})
+
+    from app.guardrails import screen
+    allowed, msg = await screen(req.query, "query")
+    if not allowed:
+        raise HTTPException(400, msg)
+
     if req.paper_text:
         try:
             get_kb().ingest(req.paper_text, filename=req.paper_filename)  # session_id discarded — research mode
@@ -535,6 +541,10 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
         full_text = "\n".join(p["text"] for p in result["pages"])
         if not full_text.strip() and not result["figures"]:
             raise HTTPException(400, "No text or figures extracted from PDF")
+        from app.guardrails import screen
+        allowed, msg = await screen(full_text[:4000], "document")
+        if not allowed:
+            raise HTTPException(400, msg)
         session_id, doc_id = await asyncio.to_thread(
             lambda: kb.ingest(
                 pages=result["pages"], pdf_bytes=content, figures=result["figures"],
@@ -548,6 +558,10 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
         text = content.decode("utf-8", errors="ignore")
         if not text.strip():
             raise HTTPException(400, "No text extracted")
+        from app.guardrails import screen
+        allowed, msg = await screen(text[:4000], "document")
+        if not allowed:
+            raise HTTPException(400, msg)
         session_id, doc_id = await asyncio.to_thread(
             lambda: kb.ingest(text=text, filename=filename)
         )
@@ -662,6 +676,11 @@ async def ask_paper(req: PaperAskReq):
     kb = get_kb()
     if not kb.get_session_meta(req.session_id):
         raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
+
+    from app.guardrails import screen
+    allowed, msg = await screen(req.question, "question")
+    if not allowed:
+        return PaperAskResp(question=req.question, answer=msg, confidence="low")
 
     try:
         agent = PaperQAAgent()
