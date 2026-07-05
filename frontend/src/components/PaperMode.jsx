@@ -56,6 +56,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [vizLoading, setVizLoading] = useState(false);
   const [vizErr, setVizErr]       = useState('');
   const [teachLesson, setTeachLesson] = useState(null);
+  const [teachOpen, setTeachOpen] = useState(false);
   const [teachLoading, setTeachLoading] = useState(false);
   const [teachErr, setTeachErr]   = useState('');
   const [paperFile, setPaperFile] = useState(null);   // browser File for client-side PDF render
@@ -93,7 +94,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const reopenPaper = async (sid) => {
     setPhase('processing');
     setProcStep('summary'); setDoneSteps(['parse', 'embed']);
-    setPaperFile(null); setMessages([]); setHighlights([]); setVizData(null); setTeachLesson(null);
+    setPaperFile(null); setMessages([]); setHighlights([]); setVizData(null); setTeachLesson(null); setTeachOpen(false);
     try {
       const meta = await getPaperMeta(sid);
       setSessionId(sid);
@@ -129,7 +130,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
     if (!req.url) return;
 
     setPaperFile(null); setMessages([]); setHighlights([]);
-    setVizData(null); setTeachLesson(null); setSummary(null);
+    setVizData(null); setTeachLesson(null); setTeachOpen(false); setSummary(null);
     setFilename(req.title || 'Fetching paper…');
     setPhase('processing');
     setProcStep('parse'); setDoneSteps([]); setProcMeta({});
@@ -249,7 +250,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
     setVizData(null);
     setVizErr('');
     setSectionsOpen(false);
-    setTeachLesson(null);
+    setTeachLesson(null); setTeachOpen(false);
     setTeachErr('');
     setPaperFile(null);
     setHasPdf(false);
@@ -257,14 +258,20 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   };
 
   const handleTeach = async () => {
-    if (teachLoading || !sessionId) return;
+    if (!sessionId) return;
+    // Open immediately — the section list is available from the summary, so the
+    // user can start learning right away. The intro (big picture) loads in the
+    // background and is optional; if it's slow or fails, sections still work.
+    setTeachOpen(true);
     setTeachErr('');
+    if (teachLesson || teachLoading) return;
     setTeachLoading(true);
     try {
       const data = await teachPaper(sessionId);
       setTeachLesson(data);
     } catch (e) {
-      setTeachErr(e.response?.data?.detail || e.message || 'Failed to generate lesson');
+      // Non-fatal: sections don't depend on this.
+      setTeachErr(e.response?.data?.detail || e.message || '');
     } finally {
       setTeachLoading(false);
     }
@@ -560,40 +567,34 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
           )}
 
           {/* ── Teach Me ── */}
-          {!teachLesson && (
+          {!teachOpen && (
             <div className="teach-card">
               <div className="teach-card-left">
                 <GraduationCap className="teach-card-icon" />
                 <div>
                   <div className="teach-card-title">Teach me this paper</div>
                   <div className="teach-card-sub">
-                    Step-by-step guided lesson with analogies and key takeaways — like having an expert explain it to you
+                    Section-by-section lesson — each part explained in depth with its equations &amp; figures
                   </div>
                 </div>
               </div>
-              <button
-                className="btn btn-p"
-                onClick={handleTeach}
-                disabled={teachLoading}
-              >
-                {teachLoading
-                  ? <><span className="spin" /> Preparing lesson…</>
-                  : <><GraduationCap size={15} /> Teach Me</>}
+              <button className="btn btn-p" onClick={handleTeach}>
+                <GraduationCap size={15} /> Teach Me
               </button>
-              {teachErr && <div className="paper-err" style={{ width: '100%', marginTop: 6 }}>{teachErr}</div>}
             </div>
           )}
 
-          {/* ── Teacher lesson ── */}
-          {teachLesson && (
+          {/* ── Teacher lesson (opens instantly; intro loads in background) ── */}
+          {teachOpen && (
             <PaperTeacher
               lesson={teachLesson}
+              introLoading={teachLoading}
               sections={summary?.section_breakdown || []}
               sessionId={sessionId}
               onLocate={locateInPdf}
               onLocatePage={locatePage}
               onSave={(sec, body) => note.add(`Section · ${sec}`, body)}
-              onClose={() => setTeachLesson(null)}
+              onClose={() => setTeachOpen(false)}
             />
           )}
 

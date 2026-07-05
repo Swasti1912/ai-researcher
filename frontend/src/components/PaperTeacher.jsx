@@ -11,7 +11,7 @@ import React from 'react';
 import { GraduationCap } from 'lucide-react';
 import SectionBreakdown from './SectionBreakdown';
 
-export default function PaperTeacher({ lesson, sections = [], sessionId, onLocate, onLocatePage, onSave, onClose }) {
+export default function PaperTeacher({ lesson, introLoading, sections = [], sessionId, onLocate, onLocatePage, onSave, onClose }) {
   return (
     <div className="teacher-panel">
 
@@ -29,7 +29,12 @@ export default function PaperTeacher({ lesson, sections = [], sessionId, onLocat
         <button className="btn btn-g teacher-close" onClick={onClose}>✕ Close</button>
       </div>
 
-      {/* Big picture + prerequisites */}
+      {/* Big picture + prerequisites (loads in the background) */}
+      {introLoading && !lesson?.big_picture && (
+        <div className="teacher-big-picture" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--t2)', fontSize: '.82rem' }}>
+          <span className="spin" style={{ width: 13, height: 13 }} /> Preparing the big-picture overview…
+        </div>
+      )}
       {lesson?.big_picture && (
         <div className="teacher-big-picture">
           <div className="teacher-bp-label">The Big Picture</div>
