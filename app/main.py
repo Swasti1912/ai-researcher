@@ -106,9 +106,26 @@ app.include_router(router)
 # /api instead), so we fall back to a plain JSON root.
 _UI_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
+
+class _CachedUI(StaticFiles):
+    """Serve the SPA with correct caching:
+      • index.html → no-cache, so returning visitors always fetch the newest
+        (hashed) bundle instead of a stale one that can render blank/broken.
+      • hashed assets (/assets/*) → cache forever; they're content-addressed.
+    """
+    async def get_response(self, path, scope):  # type: ignore[override]
+        resp = await super().get_response(path, scope)
+        if resp.status_code == 200:
+            if "text/html" in resp.headers.get("content-type", ""):
+                resp.headers["Cache-Control"] = "no-cache"
+            else:
+                resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
 if _UI_DIST.is_dir() and (_UI_DIST / "index.html").is_file():
     # Mounted last: /api, /docs and /redoc are already registered and win.
-    app.mount("/", StaticFiles(directory=str(_UI_DIST), html=True), name="ui")
+    app.mount("/", _CachedUI(directory=str(_UI_DIST), html=True), name="ui")
 else:
     @app.get("/", tags=["root"])
     async def root():
