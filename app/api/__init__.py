@@ -486,10 +486,10 @@ async def get_result(request_id: str):
 
 
 def _library_on() -> bool:
-    """Persistence/Library is active when auth gates the app (per-user) or the
-    single-tenant ENABLE_LIBRARY flag is set."""
-    s = get_settings()
-    return s.auth_enabled or s.enable_library
+    """Persistence/Library is controlled solely by ENABLE_LIBRARY, independent of
+    auth — so you can keep login on but turn off saved papers (and their disk
+    usage). When on *and* auth is on, the library is scoped per-user."""
+    return get_settings().enable_library
 
 
 async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: str,
