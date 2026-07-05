@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, MapPin, GraduationCap, Table2 } from 'lucide-react';
+import { ChevronDown, MapPin, GraduationCap, Table2, NotebookPen } from 'lucide-react';
 import { teachSection, paperFigureUrl } from '../services/api';
 import Markdown from './Markdown';
 
@@ -11,19 +11,19 @@ import Markdown from './Markdown';
  *   onLocate(text)      — jump PDF to the section heading
  *   onLocatePage(page)  — jump PDF to a figure's page
  */
-export default function SectionBreakdown({ sections = [], sessionId, onLocate, onLocatePage }) {
+export default function SectionBreakdown({ sections = [], sessionId, onLocate, onLocatePage, onSave }) {
   if (!sections.length) return null;
   return (
     <div className="paper-sections-list">
       {sections.map((s, i) => (
         <SectionItem key={i} section={s} sessionId={sessionId}
-          onLocate={onLocate} onLocatePage={onLocatePage} />
+          onLocate={onLocate} onLocatePage={onLocatePage} onSave={onSave} />
       ))}
     </div>
   );
 }
 
-function SectionItem({ section, sessionId, onLocate, onLocatePage }) {
+function SectionItem({ section, sessionId, onLocate, onLocatePage, onSave }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -72,7 +72,15 @@ function SectionItem({ section, sessionId, onLocate, onLocatePage }) {
           {err && <div className="paper-err">{err}</div>}
           {data && (
             <>
-              <div className="section-teach-badge"><GraduationCap size={13} /> In-depth lesson</div>
+              <div className="section-teach-badge">
+                <span><GraduationCap size={13} /> In-depth lesson</span>
+                {onSave && (
+                  <button className="save-note-btn" title="Save this lesson to your notes"
+                    onClick={() => onSave(section.section, data.explanation)}>
+                    <NotebookPen size={12} /> Save to notes
+                  </button>
+                )}
+              </div>
               <Markdown>{data.explanation}</Markdown>
 
               {data.figures?.length > 0 && (

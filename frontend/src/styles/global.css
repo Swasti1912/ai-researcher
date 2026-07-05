@@ -761,3 +761,26 @@ details[open]>summary::before{content:'▾'}
 .save-note-btn:hover{border-color:var(--orange);color:var(--orange);background:var(--orange-d)}
 .save-note-btn.saved{color:var(--green);border-color:var(--green)}
 .concept-detail-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+
+/* ══ Notes: floating button + slide-out drawer ═══════════════════════ */
+.notes-fab{position:fixed;right:22px;bottom:22px;z-index:900;display:inline-flex;align-items:center;gap:8px;
+  background:var(--orange);color:#fff;border:none;border-radius:24px;padding:11px 18px;font-family:var(--f);
+  font-size:.85rem;font-weight:600;cursor:pointer;box-shadow:var(--shadow-lg);transition:transform .12s}
+.notes-fab:hover{transform:translateY(-2px)}
+.notes-fab-count{background:rgba(255,255,255,.28);border-radius:12px;padding:1px 8px;font-size:.72rem;font-family:var(--m)}
+.notes-drawer-overlay{position:fixed;inset:0;z-index:1100;background:rgba(20,16,10,.38);backdrop-filter:blur(2px);
+  display:flex;justify-content:flex-end}
+.notes-drawer{width:min(440px,100%);height:100%;background:var(--bg1);border-left:1px solid var(--bdr);
+  box-shadow:var(--shadow-lg);animation:notes-slide .18s ease}
+@keyframes notes-slide{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}
+/* panel fills the drawer */
+.notes-drawer .nw{height:100%;display:flex;flex-direction:column;border:none;border-radius:0;background:transparent}
+.nw-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--bdr)}
+.nw-head-l{min-width:0;flex:1}
+.nw-kicker{font-family:var(--m);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
+.nw-head-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.nw-close{width:30px;height:30px}
+.notes-drawer .nw-list{flex:1;max-height:none;padding:16px 20px}
+.notes-drawer .nw-composer{padding:14px 20px;border-top:1px solid var(--bdr);margin-top:0}
+@media(max-width:640px){.notes-drawer{width:100%}}
+.section-teach-badge{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}

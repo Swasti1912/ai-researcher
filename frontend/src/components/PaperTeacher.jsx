@@ -11,7 +11,7 @@ import React from 'react';
 import { GraduationCap } from 'lucide-react';
 import SectionBreakdown from './SectionBreakdown';
 
-export default function PaperTeacher({ lesson, sections = [], sessionId, onLocate, onLocatePage, onClose }) {
+export default function PaperTeacher({ lesson, sections = [], sessionId, onLocate, onLocatePage, onSave, onClose }) {
   return (
     <div className="teacher-panel">
 
@@ -54,6 +54,7 @@ export default function PaperTeacher({ lesson, sections = [], sessionId, onLocat
             sessionId={sessionId}
             onLocate={onLocate}
             onLocatePage={onLocatePage}
+            onSave={onSave}
           />
         </>
       ) : (
