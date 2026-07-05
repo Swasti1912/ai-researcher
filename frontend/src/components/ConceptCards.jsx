@@ -5,9 +5,9 @@
  * Clicking sends a pre-built deep-dive question to the chat via onAsk().
  */
 import React, { useState } from 'react';
-import { MapPin } from 'lucide-react';
+import { MapPin, NotebookPen } from 'lucide-react';
 
-export default function ConceptCards({ concepts = [], onAsk, onLocate, disabled }) {
+export default function ConceptCards({ concepts = [], onAsk, onLocate, onSave, disabled }) {
   const [expanded, setExpanded] = useState(null);
 
   if (!concepts.length) return null;
@@ -56,13 +56,22 @@ export default function ConceptCards({ concepts = [], onAsk, onLocate, disabled 
                       {imp}
                     </div>
                   )}
-                  <button
-                    className="btn btn-p concept-ask-btn"
-                    onClick={(e) => { e.stopPropagation(); handleAsk(c); }}
-                    disabled={disabled}
-                  >
-                    ✦ Deep-dive in chat
-                  </button>
+                  <div className="concept-detail-actions">
+                    <button
+                      className="btn btn-p concept-ask-btn"
+                      onClick={(e) => { e.stopPropagation(); handleAsk(c); }}
+                      disabled={disabled}
+                    >
+                      ✦ Deep-dive in chat
+                    </button>
+                    {onSave && (
+                      <button className="save-note-btn"
+                        onClick={(e) => { e.stopPropagation(); onSave(c); }}
+                        title="Save this concept to your notes">
+                        <NotebookPen size={12} /> Save to notes
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

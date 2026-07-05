@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink, ArrowLeft } from 'lucide-react';
+import { FileText, UploadCloud, AlertTriangle, ArrowUp, GraduationCap, Map, RotateCcw, ScrollText, PanelsTopLeft, ExternalLink, ArrowLeft, NotebookPen } from 'lucide-react';
 import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, teachPaper, fetchPaperFromUrl,
   getConfig, getPaperMeta, getPaperChat, getHighlights, createHighlight, updateHighlightNote, deleteHighlight } from '../services/api';
 import ConceptCards from './ConceptCards';
@@ -7,7 +7,9 @@ import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
 import Library from './Library';
 import HighlightsPanel from './HighlightsPanel';
+import NotesPanel from './NotesPanel';
 import Markdown from './Markdown';
+import { useNotes } from '../hooks/useNotes';
 
 // Lazy-loaded: pulls in Mermaid + Recharts only when a visualization is opened.
 const PaperVisualization = lazy(() => import('./PaperVisualization'));
@@ -61,6 +63,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [mobileView, setMobileView] = useState('ai'); // 'pdf' | 'ai' (narrow screens)
   const [highlights, setHighlights] = useState([]);   // persisted PDF highlights/notes
   const [libraryKey, setLibraryKey] = useState(0);    // bump to refresh the library list
+  const note = useNotes(sessionId, filename);         // per-paper notes (localStorage + .md export)
   const fileRef = useRef();
   const chatRef = useRef();
   const pdfPaneRef = useRef();
@@ -552,6 +555,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
               highlights={highlights}
               onOpen={(id) => pdfPaneRef.current?.scrollToHighlight?.(id)}
               onDelete={handleDeleteHighlight}
+              onSave={(h) => note.add(`Highlight · p${h.page}`, h.note ? `“${h.quote}”\n\n${h.note}` : `“${h.quote}”`)}
             />
           )}
 
@@ -598,9 +602,13 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
               concepts={summary.key_concepts}
               onAsk={(q) => { sendQuestion(q); }}
               onLocate={(name) => locateInPdf(name)}
+              onSave={(c) => note.add(`Concept · ${c.name}`, c.importance ? `${c.definition}\n\nWhy it matters: ${c.importance}` : c.definition)}
               disabled={asking}
             />
           )}
+
+          {/* ── Notes (your document) ── */}
+          <NotesPanel note={note} />
 
           {/* ── Visualize card ── */}
           {!vizData && (
@@ -647,7 +655,8 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
                 </div>
               )}
               {messages.map((m, i) => (
-                <ChatMessage key={i} msg={m} onFollowUp={sendQuestion} onLocate={locateInPdf} disabled={asking} />
+                <ChatMessage key={i} msg={m} onFollowUp={sendQuestion} onLocate={locateInPdf}
+                  onSave={(body) => note.add('Q&A', body)} disabled={asking} />
               ))}
               {asking && (
                 <div className="chat-msg chat-msg-assistant">
@@ -697,14 +706,22 @@ function SummaryCard({ icon, label, text }) {
   );
 }
 
-function ChatMessage({ msg, onFollowUp, onLocate, disabled }) {
+function ChatMessage({ msg, onFollowUp, onLocate, onSave, disabled }) {
   const isUser = msg.role === 'user';
+  const [saved, setSaved] = useState(false);
   return (
     <div className={`chat-msg ${isUser ? 'chat-msg-user' : 'chat-msg-assistant'}`}>
       <div className="chat-bubble">
         {isUser
           ? <div className="chat-content">{msg.content}</div>
           : <div className="chat-content"><Markdown>{msg.content}</Markdown></div>}
+
+        {!isUser && onSave && msg.content && (
+          <button className={`save-note-btn ${saved ? 'saved' : ''}`} style={{ marginTop: 8 }}
+            onClick={() => { onSave(msg.content); setSaved(true); setTimeout(() => setSaved(false), 1500); }}>
+            <NotebookPen size={11} /> {saved ? 'Saved' : 'Save to notes'}
+          </button>
+        )}
 
         {!isUser && msg.evidence?.length > 0 && (
           <details className="chat-evidence" open>
