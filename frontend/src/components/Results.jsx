@@ -1,11 +1,78 @@
 import React, { useState, useMemo } from 'react';
 import {
   FileText, GraduationCap, Link2, ChevronDown, Sparkles,
-  BadgeCheck, Library, SlidersHorizontal, ExternalLink,
+  BadgeCheck, Library, SlidersHorizontal, ExternalLink, NotebookPen, ArrowUp, MessagesSquare,
 } from 'lucide-react';
 import Markdown from './Markdown';
 import Viz from './Viz';
+import NotesDock from './NotesDock';
 import { explainSubQuestion } from '../services/api';
+import { useNotes } from '../hooks/useNotes';
+
+/* Save-to-notes button */
+function SaveBtn({ onSave, style }) {
+  const [saved, setSaved] = useState(false);
+  return (
+    <button className={`save-note-btn ${saved ? 'saved' : ''}`} style={style}
+      onClick={() => { onSave(); setSaved(true); setTimeout(() => setSaved(false), 1500); }}>
+      <NotebookPen size={11} /> {saved ? 'Saved' : 'Save to notes'}
+    </button>
+  );
+}
+
+/* Follow-up chat about the searched topic (reuses the sub-question endpoint) */
+function TopicChat({ context, apiResults, onSave }) {
+  const [messages, setMessages] = useState([]);
+  const [q, setQ] = useState('');
+  const [asking, setAsking] = useState(false);
+
+  const send = async () => {
+    const text = q.trim();
+    if (!text || asking) return;
+    setQ(''); setAsking(true);
+    setMessages(m => [...m, { role: 'user', content: text }]);
+    try {
+      const res = await explainSubQuestion(text, context || '', apiResults || []);
+      setMessages(m => [...m, { role: 'assistant', content: res.answer || '', papers: res.papers || [] }]);
+    } catch (e) {
+      setMessages(m => [...m, { role: 'assistant', content: '⚠️ ' + (e.response?.data?.detail || e.message) }]);
+    } finally { setAsking(false); }
+  };
+
+  return (
+    <div>
+      <div className="ref-heading" style={{ marginBottom: 12 }}>
+        <MessagesSquare size={13} /> Ask a follow-up about this topic
+      </div>
+      <div className="topic-chat">
+        {messages.length === 0 && (
+          <div className="paper-chat-empty">Dive deeper — ask anything about what you just searched.</div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`chat-msg ${m.role === 'user' ? 'chat-msg-user' : 'chat-msg-assistant'}`}>
+            <div className="chat-bubble">
+              {m.role === 'user' ? <div className="chat-content">{m.content}</div>
+                : <div className="chat-content"><Markdown>{m.content}</Markdown></div>}
+              {m.role === 'assistant' && m.content && !m.content.startsWith('⚠️') && (
+                <SaveBtn onSave={() => onSave('Follow-up', m.content)} style={{ marginTop: 8 }} />
+              )}
+            </div>
+          </div>
+        ))}
+        {asking && <div className="chat-msg chat-msg-assistant"><div className="chat-bubble"><div className="chat-thinking"><span className="spin" style={{ width: 12, height: 12 }} /> Searching…</div></div></div>}
+      </div>
+      <div className="paper-qa-input" style={{ marginTop: 10 }}>
+        <textarea rows={2} placeholder="e.g. How does this compare to prior approaches?" value={q}
+          onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          disabled={asking} />
+        <button className="btn btn-p" onClick={send} disabled={!q.trim() || asking}>
+          {asking ? <span className="spin" /> : <ArrowUp size={16} />}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const SOURCE_META = {
   arxiv:            { label: 'arXiv',            Icon: FileText,       color: '#f2822c' },
@@ -225,6 +292,7 @@ export default function Results({ result: r, onOpenPaper }) {
   const answer = r.final_answer || r.reasoning_output || '_No answer produced._';
   const qualityPct = r.evaluation ? (r.evaluation.quality_score * 100).toFixed(0) : null;
   const qClass = qualityPct >= 70 ? 'pill-g' : 'pill-o';
+  const note = useNotes(r.request_id || 'research', r.original_query || 'Research');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -241,6 +309,9 @@ export default function Results({ result: r, onOpenPaper }) {
         </div>
         <div className="answer-card">
           <Markdown>{answer}</Markdown>
+          <div style={{ marginTop: 12 }}>
+            <SaveBtn onSave={() => note.add(`Answer · ${r.original_query || 'Research'}`, answer)} />
+          </div>
         </div>
       </div>
 
@@ -272,8 +343,15 @@ export default function Results({ result: r, onOpenPaper }) {
         </div>
       )}
 
+      {/* Deep-dive chat about the topic */}
+      <TopicChat context={r.aggregated_context} apiResults={r.api_results}
+        onSave={(src, body) => note.add(src, body)} />
+
       {/* Technical details */}
       <DetailsDrawer r={r} />
+
+      {/* Notes dock (floating button + drawer) */}
+      <NotesDock note={note} />
     </div>
   );
 }

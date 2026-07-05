@@ -784,3 +784,4 @@ details[open]>summary::before{content:'▾'}
 .notes-drawer .nw-composer{padding:14px 20px;border-top:1px solid var(--bdr);margin-top:0}
 @media(max-width:640px){.notes-drawer{width:100%}}
 .section-teach-badge{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.topic-chat{display:flex;flex-direction:column;gap:12px;max-height:460px;overflow-y:auto;padding:4px 2px}

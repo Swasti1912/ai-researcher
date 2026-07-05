@@ -7,7 +7,7 @@ import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
 import Library from './Library';
 import HighlightsPanel from './HighlightsPanel';
-import NotesPanel from './NotesPanel';
+import NotesDock from './NotesDock';
 import Markdown from './Markdown';
 import { useNotes } from '../hooks/useNotes';
 
@@ -64,7 +64,6 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
   const [highlights, setHighlights] = useState([]);   // persisted PDF highlights/notes
   const [libraryKey, setLibraryKey] = useState(0);    // bump to refresh the library list
   const note = useNotes(sessionId, filename);         // per-paper notes (localStorage + .md export)
-  const [notesOpen, setNotesOpen] = useState(false);  // slide-out notes drawer
   const fileRef = useRef();
   const chatRef = useRef();
   const pdfPaneRef = useRef();
@@ -689,17 +688,8 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
             </div>{/* .paper-split-panels */}
           </div>{/* .paper-split */}
 
-          {/* ── Notes: floating button + slide-out drawer ── */}
-          <button className="notes-fab" onClick={() => setNotesOpen(true)} title="Open notes">
-            <NotebookPen size={16} /> Notes{note.notes.length ? <span className="notes-fab-count">{note.notes.length}</span> : null}
-          </button>
-          {notesOpen && (
-            <div className="notes-drawer-overlay" onClick={e => e.target === e.currentTarget && setNotesOpen(false)}>
-              <div className="notes-drawer">
-                <NotesPanel note={note} onClose={() => setNotesOpen(false)} />
-              </div>
-            </div>
-          )}
+          {/* ── Notes dock (floating button + drawer) ── */}
+          <NotesDock note={note} />
         </>
       )}
     </div>
