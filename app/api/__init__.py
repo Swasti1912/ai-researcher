@@ -38,6 +38,61 @@ router = APIRouter(prefix="/api", tags=["AI Researcher"])
 _store: Dict[str, Dict[str, Any]] = {}
 
 
+# ── Background jobs (HF Spaces proxy kills requests > ~60 s) ──────────────────
+# The slow LLM endpoints (summarize / teach / visualize / teach-section) can
+# exceed the reverse-proxy timeout on Hugging Face Spaces, which 504s any
+# request that takes longer than about a minute. Instead of holding the HTTP
+# connection open, POST /paper/<x>/start returns a job_id immediately, the
+# work runs as an asyncio task, and the client polls GET /paper/job/{job_id}.
+# NOTE: in-memory — requires a single uvicorn worker (which is what we run).
+
+_jobs: Dict[str, Dict[str, Any]] = {}
+_JOB_TTL_SECONDS = 15 * 60
+
+
+def _jobs_gc() -> None:
+    import time
+    cutoff = time.time() - _JOB_TTL_SECONDS
+    for jid in [j for j, v in _jobs.items() if v["created"] < cutoff]:
+        _jobs.pop(jid, None)
+
+
+def _start_job(coro) -> str:
+    """Run ``coro`` as a background task; return a job_id to poll."""
+    import time
+    import uuid
+    _jobs_gc()
+    job_id = uuid.uuid4().hex
+    _jobs[job_id] = {"status": "running", "result": None, "error": None,
+                     "created": time.time()}
+
+    async def _run() -> None:
+        try:
+            result = await coro
+            if isinstance(result, BaseModel):
+                result = result.model_dump()
+            _jobs[job_id]["result"] = result
+            _jobs[job_id]["status"] = "done"
+        except Exception as exc:  # HTTPException detail or plain message
+            _jobs[job_id]["error"] = getattr(exc, "detail", None) or str(exc)
+            _jobs[job_id]["status"] = "error"
+            _log.error("Job failed", extra={"job": job_id, "err": _jobs[job_id]["error"]})
+
+    asyncio.create_task(_run())
+    return job_id
+
+
+class JobStartResp(BaseModel):
+    job_id: str
+    status: str = "running"
+
+class JobStatusResp(BaseModel):
+    job_id: str
+    status: str                              # running | done | error
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class ResearchReq(BaseModel):
@@ -765,6 +820,40 @@ async def teach_section(req: TeachSectionReq):
     except Exception as exc:
         _log.error("Teach-section error", extra={"err": str(exc)})
         raise HTTPException(500, getattr(exc, "detail", None) or str(exc))
+
+
+# ── Async job variants of the slow LLM endpoints ──────────────────────────────
+# Same request bodies, but they return a job_id immediately instead of holding
+# the connection open. Poll GET /paper/job/{job_id} for the result — required
+# on Hugging Face Spaces, whose proxy 504s requests longer than ~60 s.
+
+@router.post("/paper/summarize/start", response_model=JobStartResp)
+async def summarize_paper_start(req: PaperSummarizeReq):
+    return JobStartResp(job_id=_start_job(summarize_paper(req)))
+
+
+@router.post("/paper/teach/start", response_model=JobStartResp)
+async def teach_paper_start(req: PaperTeachReq):
+    return JobStartResp(job_id=_start_job(teach_paper(req)))
+
+
+@router.post("/paper/visualize/start", response_model=JobStartResp)
+async def visualize_paper_start(req: PaperVisualizeReq):
+    return JobStartResp(job_id=_start_job(visualize_paper(req)))
+
+
+@router.post("/paper/teach-section/start", response_model=JobStartResp)
+async def teach_section_start(req: TeachSectionReq):
+    return JobStartResp(job_id=_start_job(teach_section(req)))
+
+
+@router.get("/paper/job/{job_id}", response_model=JobStatusResp)
+async def get_job_status(job_id: str):
+    j = _jobs.get(job_id)
+    if not j:
+        raise HTTPException(404, "Job not found or expired")
+    return JobStatusResp(job_id=job_id, status=j["status"],
+                         result=j["result"], error=j["error"])
 
 
 @router.post("/paper/from-url", response_model=UploadResp)

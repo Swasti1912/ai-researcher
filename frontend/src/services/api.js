@@ -22,9 +22,28 @@ export const getResult = (id) => http.get(`/research/${id}`).then(r => r.data);
 export const getHealth = () => http.get('/health').then(r => r.data);
 export const getTopology = () => http.get('/graph-topology').then(r => r.data);
 
+// ── Background-job runner ─────────────────────────────────────────────────────
+// The slow LLM endpoints (summarize / teach / visualize / teach-section) go
+// through a start-then-poll flow: hosting proxies (e.g. Hugging Face Spaces)
+// kill any request that holds the connection longer than ~60 s, so no single
+// HTTP call here ever takes more than a moment.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const runJob = async (startPath, body, { interval = 2500, maxWait = 300_000 } = {}) => {
+  const { job_id } = (await http.post(startPath, body)).data;
+  const t0 = Date.now();
+  for (;;) {
+    await sleep(interval);
+    const { status, result, error } = (await http.get(`/paper/job/${job_id}`)).data;
+    if (status === 'done') return result;
+    if (status === 'error') throw new Error(error || 'Processing failed');
+    if (Date.now() - t0 > maxWait) throw new Error('Timed out waiting for the result');
+  }
+};
+
 // Paper mode — all calls are scoped to a session_id returned by uploadPaper
 export const summarizePaper = (sessionId, filename) =>
-  http.post('/paper/summarize', { session_id: sessionId, filename }, { timeout: 180_000 }).then(r => r.data);
+  runJob('/paper/summarize/start', { session_id: sessionId, filename });
 
 export const askPaper = (question, sessionId) =>
   http.post('/paper/ask', { question, session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);
@@ -33,13 +52,13 @@ export const deleteSession = (sessionId) =>
   http.delete(`/paper/session/${sessionId}`).then(r => r.data);
 
 export const visualizePaper = (sessionId) =>
-  http.post('/paper/visualize', { session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);
+  runJob('/paper/visualize/start', { session_id: sessionId });
 
 export const teachPaper = (sessionId) =>
-  http.post('/paper/teach', { session_id: sessionId }, { timeout: 180_000 }).then(r => r.data);
+  runJob('/paper/teach/start', { session_id: sessionId });
 
 export const teachSection = (sessionId, section, summary) =>
-  http.post('/paper/teach-section', { session_id: sessionId, section, summary }, { timeout: 120_000 }).then(r => r.data);
+  runJob('/paper/teach-section/start', { session_id: sessionId, section, summary });
 
 export const fetchPaperFromUrl = (url, abstract, title) =>
   http.post('/paper/from-url', { url, abstract, title }, { timeout: 60_000 }).then(r => r.data);
