@@ -8,7 +8,7 @@ export const logout = () => http.post('/auth/logout').then(r => r.data);
 export const loginUrl = (provider = 'google') => `/api/auth/login/${provider}`;
 
 export const submitResearch = (query, paperText, paperFilename, maxIterations = 3) =>
-  http.post('/research', { query, paper_text: paperText, paper_filename: paperFilename, max_iterations: maxIterations }).then(r => r.data);
+  runJob('/research/start', { query, paper_text: paperText, paper_filename: paperFilename, max_iterations: maxIterations });
 
 export const uploadPaper = (file) => {
   const fd = new FormData(); fd.append('file', file);
@@ -46,7 +46,7 @@ export const summarizePaper = (sessionId, filename) =>
   runJob('/paper/summarize/start', { session_id: sessionId, filename });
 
 export const askPaper = (question, sessionId) =>
-  http.post('/paper/ask', { question, session_id: sessionId }, { timeout: 120_000 }).then(r => r.data);
+  runJob('/paper/ask/start', { question, session_id: sessionId });
 
 export const deleteSession = (sessionId) =>
   http.delete(`/paper/session/${sessionId}`).then(r => r.data);

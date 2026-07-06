@@ -847,6 +847,16 @@ async def teach_section_start(req: TeachSectionReq):
     return JobStartResp(job_id=_start_job(teach_section(req)))
 
 
+@router.post("/paper/ask/start", response_model=JobStartResp)
+async def ask_paper_start(req: PaperAskReq):
+    return JobStartResp(job_id=_start_job(ask_paper(req)))
+
+
+@router.post("/research/start", response_model=JobStartResp)
+async def run_research_start(req: ResearchReq):
+    return JobStartResp(job_id=_start_job(run_research(req)))
+
+
 @router.get("/paper/job/{job_id}", response_model=JobStatusResp)
 async def get_job_status(job_id: str):
     j = _jobs.get(job_id)
