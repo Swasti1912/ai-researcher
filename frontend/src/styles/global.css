@@ -557,24 +557,26 @@ details[open]>summary::before{content:'▾'}
 /* ══ Paper reader: split-pane (PDF ‖ AI insights) ═════════════════════ */
 .main-inner-wide{max-width:1500px}
 
-.paper-viewtoggle{display:none;gap:6px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rs);padding:4px;position:sticky;top:0;z-index:5}
+.paper-viewtoggle{display:flex;gap:6px;max-width:340px;margin:0 auto 16px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rs);padding:4px;position:sticky;top:0;z-index:5}
 .paper-viewtoggle button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:none;border-radius:7px;padding:8px;font-family:var(--f);font-size:.8rem;font-weight:600;color:var(--t2);cursor:pointer;transition:.15s}
 .paper-viewtoggle button.on{background:var(--orange-d);color:var(--orange)}
 
-.paper-split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px;align-items:start;height:calc(100vh - 130px)}
-.paper-split-pdf{position:sticky;top:0;height:100%;min-height:0;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg1);overflow:hidden;box-shadow:var(--shadow-sm)}
-.paper-split-panels{display:flex;flex-direction:column;gap:18px;min-width:0;overflow-y:auto;height:100%;padding-right:4px;padding-bottom:40px}
-/* No-PDF (txt/md) fallback: normal single-column flow, no split */
+/* Single-column reader: the PDF and the insight panels are toggled one at a
+   time (via .paper-viewtoggle) so each gets the FULL width. This also gives the
+   PDF pane a stable, non-zero width to render into — the old side-by-side flex
+   layout reported a 0 width on first paint and left the pane blank until a
+   window resize. */
+.paper-split{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.paper-split.mv-pdf{height:calc(100vh - 170px)}
+.paper-split.mv-pdf .paper-split-panels{display:none}
+.paper-split.mv-ai  .paper-split-pdf{display:none}
+.paper-split-pdf{height:100%;min-height:0;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg1);overflow:hidden;box-shadow:var(--shadow-sm)}
+.paper-split-panels{display:flex;flex-direction:column;gap:18px;min-width:0}
+/* No-PDF (txt/md) fallback: normal single-column flow, no toggle */
 .paper-nopdf{display:flex;flex-direction:column}
-.paper-nopdf .paper-split-panels{height:auto;overflow:visible;padding-right:0;padding-bottom:0}
 
 @media(max-width:1080px){
-  .paper-viewtoggle{display:flex}
-  .paper-split{grid-template-columns:minmax(0,1fr);height:auto}
-  .paper-split-pdf{height:78vh;position:static}
-  .paper-split-panels{height:auto;overflow:visible}
-  .paper-split.mv-ai .paper-split-pdf{display:none}
-  .paper-split.mv-pdf .paper-split-panels{display:none}
+  .paper-split.mv-pdf{height:78vh}
 }
 
 /* PDF pane */
