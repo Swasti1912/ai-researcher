@@ -44,10 +44,21 @@ export default function PdfPane({
   useEffect(() => {
     if (!scrollRef.current) return;
     const el = scrollRef.current;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth - 24));
+    // Only accept a real measurement; a 0/negative reading means the flex
+    // split-pane hasn't laid out yet — ignore it so `width` never gets stuck
+    // at 0 (which would leave the pane blank until the next window resize).
+    const measure = () => {
+      const w = (el.clientWidth || 0) - 24;
+      if (w > 0) setWidth(w);
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWidth(el.clientWidth - 24);
-    return () => ro.disconnect();
+    measure();
+    // First paint often reports 0 inside a nested flexbox; re-measure on the
+    // next frame(s) once layout has settled, so we don't depend on a resize.
+    const r1 = requestAnimationFrame(measure);
+    const r2 = requestAnimationFrame(() => requestAnimationFrame(measure));
+    return () => { ro.disconnect(); cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
   }, []);
 
   const onLoad = useCallback(({ numPages }) => { setNumPages(numPages); setStatus('ready'); }, []);
@@ -174,14 +185,14 @@ export default function PdfPane({
         error={<div className="pdf-empty"><FileWarning size={22} /> Couldn't render this PDF.</div>}
         noData={<div className="pdf-empty"><FileWarning size={22} /> No PDF available.</div>}
       >
-        {status === 'ready' && width > 0 && Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
+        {status === 'ready' && Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
           <div key={p} className="pdf-page-wrap" data-page={p} ref={(el) => { pageRefs.current[p] = el; }}>
             <Page
               pageNumber={p}
-              width={width}
+              width={width > 0 ? width : 680}
               renderTextLayer
               renderAnnotationLayer={false}
-              loading={<div className="pdf-page-ph" style={{ height: width * 1.29 }} />}
+              loading={<div className="pdf-page-ph" style={{ height: (width > 0 ? width : 680) * 1.29 }} />}
             />
             {/* highlight overlays for this page */}
             <div className="pdf-hl-layer">
