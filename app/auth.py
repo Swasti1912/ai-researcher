@@ -117,7 +117,7 @@ async def auth_callback_google(request: Request):
     # Live log (visible in the Space's run logs — grep for "LOGIN").
     _log.info("LOGIN", extra={
         "email": info.get("email", ""),
-        "name": info.get("name", ""),
+        "user_name": info.get("name", ""),   # NB: 'name' is reserved on LogRecord
         "user_id": sub,
     })
     # Durable audit trail on persistent storage, so the record survives restarts
