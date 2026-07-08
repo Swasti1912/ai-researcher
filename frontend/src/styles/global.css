@@ -441,8 +441,8 @@ details[open]>summary::before{content:'▾'}
 .chat-meta-stat{font-size:.64rem;color:var(--t3);font-family:var(--m)}
 
 .paper-qa-input{display:flex;gap:8px;align-items:flex-end}
-.paper-qa-input textarea{flex:1;background:var(--bg0);border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t0);font-family:var(--f);font-size:.84rem;padding:11px 13px;resize:none;outline:none;transition:border-color .2s;line-height:1.5}
-.paper-qa-input textarea:focus{border-color:var(--orange)}
+.paper-qa-input textarea{flex:1;background:var(--bg1);border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t0);font-family:var(--f);font-size:.84rem;padding:11px 13px;resize:none;outline:none;transition:border-color .2s,box-shadow .2s;line-height:1.5;box-shadow:var(--shadow-sm)}
+.paper-qa-input textarea:focus{border-color:var(--orange);box-shadow:0 0 0 3px var(--orange-d)}
 .paper-qa-input textarea::placeholder{color:var(--t3)}
 .paper-qa-input .btn{padding:10px 14px;align-self:flex-end}
 
