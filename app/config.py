@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     # OpenAI — preferred primary when set (funded key → no free-tier daily wall,
     # high concurrency). Falls back to Groq then Gemini.
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    # Full gpt-4o by default: more elaborate/higher-quality text for the
+    # researcher "Teach me" mode, and vision-capable (figure explanations).
+    # Override with OPENAI_MODEL to use a GPT-5-class model (verify the exact
+    # id in your OpenAI dashboard first — a wrong id silently falls back to a
+    # weaker provider). Prompt caching applies automatically on these models.
+    openai_model: str = "gpt-4o"
 
     # Gemini fallback — used automatically when a Groq call fails (rate limit,
     # bad key, timeout). Inactive unless google_api_key is set.
