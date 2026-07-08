@@ -174,6 +174,10 @@ export default function App() {
           </main>
         </div>
       )}
+
+      <footer className="app-foot">
+        Help &amp; support: <a href="mailto:ai.researcher4@gmail.com">ai.researcher4@gmail.com</a>
+      </footer>
     </div>
   );
 }

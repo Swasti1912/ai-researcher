@@ -34,7 +34,11 @@ export default function Login({ error }) {
           Continue with Google
         </a>
 
-        <div className="login-foot">LinkedIn sign-in coming soon.</div>
+        <div className="login-foot">
+          LinkedIn sign-in coming soon.
+          <br />
+          Help &amp; support: <a href="mailto:ai.researcher4@gmail.com">ai.researcher4@gmail.com</a>
+        </div>
       </div>
     </div>
   );

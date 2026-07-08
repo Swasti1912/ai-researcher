@@ -707,6 +707,12 @@ details[open]>summary::before{content:'▾'}
   font-family:var(--f);font-size:.9rem;font-weight:600;color:var(--t0);text-decoration:none;transition:.15s}
 .login-btn:hover{border-color:var(--orange);box-shadow:var(--shadow-sm)}
 .login-foot{font-size:.72rem;color:var(--t3);margin-top:10px}
+.login-foot a{color:var(--orange);text-decoration:none;font-weight:600}
+.login-foot a:hover{text-decoration:underline}
+/* Global support footer (below every view) */
+.app-foot{text-align:center;padding:18px 16px 28px;font-size:.74rem;color:var(--t3)}
+.app-foot a{color:var(--orange);text-decoration:none;font-weight:600}
+.app-foot a:hover{text-decoration:underline}
 .hdr-user{display:flex;align-items:center;gap:8px;margin-left:4px}
 .hdr-avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;border:1px solid var(--bdr2)}
 .hdr-avatar-fb{background:var(--orange);color:#fff;display:grid;place-items:center;font-size:.8rem;font-weight:700;font-family:var(--f)}
