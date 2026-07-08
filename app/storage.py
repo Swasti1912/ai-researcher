@@ -191,6 +191,13 @@ def list_papers(owner: Optional[str] = None) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def get_owner(session_id: str) -> Optional[str]:
+    """Owner id for a session (or None if unknown). Lightweight — one column."""
+    with _lock:
+        row = _c().execute("SELECT owner FROM papers WHERE session_id=?", (session_id,)).fetchone()
+    return row[0] if row else None
+
+
 def delete_by_owner(owner: str) -> int:
     """Delete every paper (rows + files) owned by *owner*. Returns count."""
     import shutil

@@ -574,6 +574,27 @@ async def _persist_paper(session_id: str, pdf_bytes: Optional[bytes], source: st
         _log.warning("persist paper failed", extra={"session_id": session_id, "err": str(exc)})
 
 
+async def _guard_session(request: Request, session_id: str) -> None:
+    """Defense-in-depth ownership check for session-scoped endpoints.
+
+    When auth is on, a caller may only touch a session they own. We resolve the
+    session's owner from the in-memory meta first, then fall back to storage.
+    A mismatch raises 404 (not 403) so we don't even reveal that the session
+    exists. No-op when auth is disabled (single-tenant / local dev).
+    """
+    if not get_settings().auth_enabled:
+        return
+    from app.auth import owner_id
+    meta = get_kb().get_session_meta(session_id)
+    owner = meta.get("owner") if meta is not None else None
+    if owner is None:
+        from app import storage
+        owner = await asyncio.to_thread(lambda: storage.get_owner(session_id))
+    # Unowned/"public" sessions (created while auth was off) are not scoped.
+    if owner and owner not in ("public", "") and owner != owner_id(request):
+        raise HTTPException(404, "Session not found")
+
+
 @router.post("/upload-paper", response_model=UploadResp)
 async def upload_paper(request: Request, file: UploadFile = File(...)):
     """
@@ -635,8 +656,9 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
 
 
 @router.get("/paper/pdf/{session_id}")
-async def get_paper_pdf(session_id: str):
+async def get_paper_pdf(session_id: str, request: Request):
     """Stream the original PDF bytes for a session (404 if none stored)."""
+    await _guard_session(request, session_id)
     data = get_kb().get_pdf_bytes(session_id)
     if not data:
         raise HTTPException(404, "No PDF stored for this session")
@@ -650,8 +672,9 @@ async def get_paper_pdf(session_id: str):
 
 
 @router.get("/paper/figures/{session_id}", response_model=FiguresResp)
-async def list_paper_figures(session_id: str):
+async def list_paper_figures(session_id: str, request: Request):
     """List extracted figures/tables (metadata only, no image bytes)."""
+    await _guard_session(request, session_id)
     kb = get_kb()
     if not kb.get_session_meta(session_id):
         raise HTTPException(404, f"Session '{session_id}' not found")
@@ -667,8 +690,9 @@ async def list_paper_figures(session_id: str):
 
 
 @router.get("/paper/figure/{session_id}/{fig_id}")
-async def get_paper_figure(session_id: str, fig_id: str):
+async def get_paper_figure(session_id: str, fig_id: str, request: Request):
     """Stream a single figure PNG (404 if missing or caption-only table)."""
+    await _guard_session(request, session_id)
     f = get_kb().get_figure(session_id, fig_id)
     if not f or not f.get("png"):
         raise HTTPException(404, "Figure not found")
@@ -679,7 +703,7 @@ async def get_paper_figure(session_id: str, fig_id: str):
 
 
 @router.post("/paper/summarize", response_model=PaperSummarizeResp)
-async def summarize_paper(req: PaperSummarizeReq):
+async def summarize_paper(req: PaperSummarizeReq, request: Request):
     """
     Summarise an uploaded paper.
 
@@ -687,6 +711,7 @@ async def summarize_paper(req: PaperSummarizeReq):
     Fetches the full paper text from the session store and runs the
     PaperSummarizerAgent to produce a structured LLM summary.
     """
+    await _guard_session(request, req.session_id)
     kb = get_kb()
     text = kb.get_doc(req.session_id)
     if not text:
@@ -721,13 +746,14 @@ async def summarize_paper(req: PaperSummarizeReq):
 
 
 @router.post("/paper/ask", response_model=PaperAskResp)
-async def ask_paper(req: PaperAskReq):
+async def ask_paper(req: PaperAskReq, request: Request):
     """
     Answer a detailed question about the uploaded paper.
 
     Scoped to the caller's session: only retrieves chunks from their paper.
     Also searches arXiv + Semantic Scholar for related external context.
     """
+    await _guard_session(request, req.session_id)
     kb = get_kb()
     if not kb.get_session_meta(req.session_id):
         raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
@@ -757,13 +783,14 @@ async def ask_paper(req: PaperAskReq):
 
 
 @router.post("/paper/visualize", response_model=PaperVisualizeResp)
-async def visualize_paper(req: PaperVisualizeReq):
+async def visualize_paper(req: PaperVisualizeReq, request: Request):
     """
     Extract concept map, method flow, and result charts from the uploaded paper.
 
     Uses RAG to pull the most relevant chunks, then the LLM structures them
     into three visualization-ready JSON objects for React Flow + Recharts.
     """
+    await _guard_session(request, req.session_id)
     kb = get_kb()
     if not kb.get_session_meta(req.session_id):
         raise HTTPException(404, f"Session '{req.session_id}' not found — upload the paper first")
@@ -778,7 +805,7 @@ async def visualize_paper(req: PaperVisualizeReq):
 
 
 @router.post("/paper/teach", response_model=PaperTeachResp)
-async def teach_paper(req: PaperTeachReq):
+async def teach_paper(req: PaperTeachReq, request: Request):
     """
     Generate a teacher-style walkthrough lesson for the uploaded paper.
 
@@ -786,6 +813,7 @@ async def teach_paper(req: PaperTeachReq):
     cached summary metadata for richer context, and returns a structured
     lesson plan with chapters, analogies, and key takeaways.
     """
+    await _guard_session(request, req.session_id)
     kb = get_kb()
     text = kb.get_doc(req.session_id)
     if not text:
@@ -804,11 +832,12 @@ async def teach_paper(req: PaperTeachReq):
 
 
 @router.post("/paper/teach-section", response_model=TeachSectionResp)
-async def teach_section(req: TeachSectionReq):
+async def teach_section(req: TeachSectionReq, request: Request):
     """
     Extensively teach ONE section of the paper — weaving in its equations
     (LaTeX) and the figures/tables on that section's pages.
     """
+    await _guard_session(request, req.session_id)
     from app.agents.paper_section_teacher import PaperSectionTeacherAgent
     kb = get_kb()
     if not kb.get_session_meta(req.session_id):
@@ -828,28 +857,33 @@ async def teach_section(req: TeachSectionReq):
 # on Hugging Face Spaces, whose proxy 504s requests longer than ~60 s.
 
 @router.post("/paper/summarize/start", response_model=JobStartResp)
-async def summarize_paper_start(req: PaperSummarizeReq):
-    return JobStartResp(job_id=_start_job(summarize_paper(req)))
+async def summarize_paper_start(req: PaperSummarizeReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(summarize_paper(req, request)))
 
 
 @router.post("/paper/teach/start", response_model=JobStartResp)
-async def teach_paper_start(req: PaperTeachReq):
-    return JobStartResp(job_id=_start_job(teach_paper(req)))
+async def teach_paper_start(req: PaperTeachReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(teach_paper(req, request)))
 
 
 @router.post("/paper/visualize/start", response_model=JobStartResp)
-async def visualize_paper_start(req: PaperVisualizeReq):
-    return JobStartResp(job_id=_start_job(visualize_paper(req)))
+async def visualize_paper_start(req: PaperVisualizeReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(visualize_paper(req, request)))
 
 
 @router.post("/paper/teach-section/start", response_model=JobStartResp)
-async def teach_section_start(req: TeachSectionReq):
-    return JobStartResp(job_id=_start_job(teach_section(req)))
+async def teach_section_start(req: TeachSectionReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(teach_section(req, request)))
 
 
 @router.post("/paper/ask/start", response_model=JobStartResp)
-async def ask_paper_start(req: PaperAskReq):
-    return JobStartResp(job_id=_start_job(ask_paper(req)))
+async def ask_paper_start(req: PaperAskReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(ask_paper(req, request)))
 
 
 @router.post("/research/start", response_model=JobStartResp)
@@ -968,13 +1002,14 @@ async def paper_from_url(req: FetchPaperReq, request: Request):
 
 
 @router.delete("/paper/session/{session_id}", response_model=SessionDeleteResp)
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, request: Request):
     """
     Free all Qdrant vectors for this session.
 
     Call this when the user is done (browser close, "New paper" click, logout).
     Safe to call multiple times — returns 0 chunks if already cleaned up.
     """
+    await _guard_session(request, session_id)
     kb = get_kb()
     deleted = kb.delete_session(session_id)
     _log.info("Session freed", extra={"session_id": session_id, "chunks": deleted})
@@ -982,12 +1017,13 @@ async def delete_session(session_id: str):
 
 
 @router.post("/paper/session/{session_id}/end", response_model=SessionDeleteResp)
-async def end_session(session_id: str):
+async def end_session(session_id: str, request: Request):
     """Delete a session — POST variant for navigator.sendBeacon() on tab close.
 
     sendBeacon can only issue POST, so the frontend fires this on `pagehide`
     to wipe the user's paper the moment they leave. Idempotent.
     """
+    await _guard_session(request, session_id)
     deleted = get_kb().delete_session(session_id)
     _log.info("Session ended (beacon)", extra={"session_id": session_id, "chunks": deleted})
     return SessionDeleteResp(session_id=session_id, chunks_deleted=deleted)
@@ -1049,21 +1085,24 @@ async def paper_library(request: Request):
 
 
 @router.get("/paper/{session_id}/chat", response_model=ChatHistoryResp)
-async def paper_chat_history(session_id: str):
+async def paper_chat_history(session_id: str, request: Request):
+    await _guard_session(request, session_id)
     from app import storage
     msgs = await asyncio.to_thread(lambda: storage.get_chat(session_id))
     return ChatHistoryResp(messages=[ChatItem(**m) for m in msgs])
 
 
 @router.get("/paper/{session_id}/highlights", response_model=HighlightsResp)
-async def list_highlights(session_id: str):
+async def list_highlights(session_id: str, request: Request):
+    await _guard_session(request, session_id)
     from app import storage
     hls = await asyncio.to_thread(lambda: storage.list_highlights(session_id))
     return HighlightsResp(highlights=[Highlight(**h) for h in hls])
 
 
 @router.post("/paper/{session_id}/highlights", response_model=Highlight)
-async def create_highlight(session_id: str, body: HighlightCreate):
+async def create_highlight(session_id: str, body: HighlightCreate, request: Request):
+    await _guard_session(request, session_id)
     from app import storage
     if not get_kb().get_session_meta(session_id):
         raise HTTPException(404, "Session not found")
@@ -1090,7 +1129,7 @@ async def remove_highlight(highlight_id: str):
 
 
 @router.get("/paper/{session_id}", response_model=ReopenResp)
-async def reopen_paper(session_id: str):
+async def reopen_paper(session_id: str, request: Request):
     """
     Reopen a paper's metadata + cached summary.
 
@@ -1099,6 +1138,7 @@ async def reopen_paper(session_id: str):
     where the research "Summarize & visualize" flow ingests a paper into memory
     only and then reopens it here.
     """
+    await _guard_session(request, session_id)
     from app import storage
     row = await asyncio.to_thread(lambda: storage.get_paper(session_id))
     if row:
