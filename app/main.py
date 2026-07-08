@@ -28,26 +28,29 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
     log = get_logger("main")
     log.info("Starting", extra={"model": s.llm_model, "port": s.port})
 
-    # Eagerly initialise the embedding model and Qdrant client so the very
-    # first paper upload doesn't time out waiting for a cold-start model load.
-    # Run in a thread pool — SentenceTransformer loading is CPU/IO-bound and
-    # must not block the async event loop.
-    try:
-        from app.knowledge_base import get_kb
-        kb = get_kb()
-        await asyncio.to_thread(kb._warmup)
-        log.info("Knowledge base warmed up")
-    except Exception as exc:
-        log.warning("KB warmup failed (non-fatal)", extra={"err": str(exc)})
+    # Warm the embedding model + rehydrate the library in the BACKGROUND so the
+    # app starts serving (and HF flips to "Running") within seconds instead of
+    # blocking the whole boot on a cold ~model load. The first paper upload
+    # lazily loads the model if warmup hasn't finished yet (it already tolerates
+    # a cold start), so nothing breaks — the app is just reachable much sooner.
+    async def _warmup_bg() -> None:
+        try:
+            from app.knowledge_base import get_kb
+            await asyncio.to_thread(get_kb()._warmup)
+            log.info("Knowledge base warmed up")
+        except Exception as exc:
+            log.warning("KB warmup failed (non-fatal)", extra={"err": str(exc)})
+        # Persistent storage + library rehydrate (P2). No-op-ish when the
+        # Library is disabled; kept in the background so it never delays serving.
+        try:
+            from app import storage
+            from app.knowledge_base import get_kb
+            await asyncio.to_thread(storage.init_db)
+            await asyncio.to_thread(get_kb().load_index)
+        except Exception as exc:
+            log.warning("Storage init/load failed (non-fatal)", extra={"err": str(exc)})
 
-    # Initialise persistent storage and rehydrate the paper library (P2).
-    try:
-        from app import storage
-        from app.knowledge_base import get_kb
-        await asyncio.to_thread(storage.init_db)
-        await asyncio.to_thread(get_kb().load_index)
-    except Exception as exc:
-        log.warning("Storage init/load failed (non-fatal)", extra={"err": str(exc)})
+    warmup_task = asyncio.create_task(_warmup_bg())
 
     # Periodic idle-session sweeper: evicts in-memory sessions past the TTL so
     # abandoned uploads don't linger (persisted Library papers are exempt).
@@ -65,6 +68,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
     sweeper_task = asyncio.create_task(_sweeper())
 
     yield
+    warmup_task.cancel()
     sweeper_task.cancel()
     log.info("Shutdown")
 
