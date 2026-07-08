@@ -154,19 +154,10 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
     getConfig().then(c => setLibraryEnabled(c.library_enabled !== false)).catch(() => {});
   }, []);
 
-  // Ephemeral cleanup: when the Library is off, wipe the active paper the moment
-  // the user leaves (tab close / navigation) so nothing lingers server-side.
-  // sendBeacon survives page unload where a normal fetch would be cancelled.
-  // NOTE: this also fires on a full page refresh, which is acceptable in
-  // ephemeral mode (the paper is simply re-uploaded).
-  useEffect(() => {
-    if (libraryEnabled || !sessionId) return;
-    const end = () => {
-      try { navigator.sendBeacon(`/api/paper/session/${sessionId}/end`); } catch { /* best-effort */ }
-    };
-    window.addEventListener('pagehide', end);
-    return () => window.removeEventListener('pagehide', end);
-  }, [libraryEnabled, sessionId]);
+  // Ephemeral cleanup is handled server-side (delete on logout + idle sweeper).
+  // We deliberately do NOT wipe on `pagehide`: that event also fires on refresh
+  // and when the tab is backgrounded / bfcached, which would delete the paper
+  // out from under an active session (Visualize/Teach then 404).
 
   const openTokenRef = useRef(null);
   useEffect(() => {
