@@ -50,6 +50,16 @@ _qdrant_client = None   # QdrantClient instance
 _embed_model   = None   # SentenceTransformer instance
 _collection_ready = False
 
+# The local (in-process) Qdrant client and the SentenceTransformer model are NOT
+# safe to call from multiple threads at once — ingest/search run via
+# asyncio.to_thread, so two simultaneous uploads would hit them concurrently and
+# can crash the single worker (which then loses all in-memory jobs/sessions).
+# Serialize every embed + Qdrant call through this lock. It queues concurrent
+# requests instead of running them in parallel — correct and crash-free, at the
+# cost of some parallelism, which is the right trade on a single-process deploy.
+import threading
+_KB_LOCK = threading.RLock()
+
 
 def _get_client():
     global _qdrant_client, _collection_ready
@@ -190,8 +200,9 @@ class KnowledgeBase:
             "body": body_count, "figures": len(figures or []), "file": filename,
         })
 
-        vectors = model.encode([r["text"] for r in records],
-                               batch_size=32, show_progress_bar=False).tolist()
+        with _KB_LOCK:
+            vectors = model.encode([r["text"] for r in records],
+                                   batch_size=32, show_progress_bar=False).tolist()
 
         from qdrant_client.models import PointStruct
         now = time.time()
@@ -212,7 +223,8 @@ class KnowledgeBase:
             )
             for i, (r, vec) in enumerate(zip(records, vectors))
         ]
-        client.upsert(collection_name=collection, points=points)
+        with _KB_LOCK:
+            client.upsert(collection_name=collection, points=points)
 
         _sessions[session_id] = {
             "text":        full_text,
@@ -288,8 +300,6 @@ class KnowledgeBase:
         from app.config import get_settings
         collection = get_settings().qdrant_collection
 
-        query_vec = model.encode(query).tolist()
-
         search_filter = None
         if session_id:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -297,12 +307,14 @@ class KnowledgeBase:
                 must=[FieldCondition(key="session_id", match=MatchValue(value=session_id))]
             )
 
-        result = client.query_points(
-            collection_name=collection,
-            query=query_vec,
-            query_filter=search_filter,
-            limit=top_k,
-        )
+        with _KB_LOCK:
+            query_vec = model.encode(query).tolist()
+            result = client.query_points(
+                collection_name=collection,
+                query=query_vec,
+                query_filter=search_filter,
+                limit=top_k,
+            )
         return list(result.points)
 
     # ── Session management ─────────────────────────────────────────────
@@ -323,14 +335,15 @@ class KnowledgeBase:
         collection = get_settings().qdrant_collection
         client = _get_client()
 
-        client.delete(
-            collection_name=collection,
-            points_selector=FilterSelector(
-                filter=Filter(
-                    must=[FieldCondition(key="session_id", match=MatchValue(value=session_id))]
-                )
-            ),
-        )
+        with _KB_LOCK:
+            client.delete(
+                collection_name=collection,
+                points_selector=FilterSelector(
+                    filter=Filter(
+                        must=[FieldCondition(key="session_id", match=MatchValue(value=session_id))]
+                    )
+                ),
+            )
 
         # Also remove from persistent storage (files + SQLite rows).
         try:
