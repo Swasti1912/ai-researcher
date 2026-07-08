@@ -114,7 +114,28 @@ async def auth_callback_google(request: Request):
         "picture": info.get("picture", ""),
         "provider": "google",
     }
-    _log.info("User logged in", extra={"email": info.get("email", "")})
+    # Live log (visible in the Space's run logs — grep for "LOGIN").
+    _log.info("LOGIN", extra={
+        "email": info.get("email", ""),
+        "name": info.get("name", ""),
+        "user_id": sub,
+    })
+    # Durable audit trail on persistent storage, so the record survives restarts
+    # (the Space's live logs do not). One JSON line per sign-in.
+    try:
+        import json, os, time
+        from app.config import get_settings
+        path = os.path.join(get_settings().data_dir, "logins.log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts":    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "email": info.get("email", ""),
+                "name":  info.get("name", ""),
+                "id":    sub,
+            }) + "\n")
+    except Exception as exc:  # never let audit logging break sign-in
+        _log.warning("login audit write failed", extra={"err": str(exc)})
     return RedirectResponse("/")
 
 
