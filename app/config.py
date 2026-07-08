@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # exists. Local dev keeps it on. Set ENABLE_LIBRARY=false in production.
     enable_library: bool = True
 
+    # Retention for on-disk (persisted) Library papers, in hours. The idle
+    # sweeper deletes persisted papers (memory + Qdrant + storage) older than
+    # this so a durable deployment doesn't accumulate data forever. 0 = keep
+    # forever. Explicit logout always wipes a user's data immediately.
+    persisted_retention_hours: float = 48.0
+
     # Auth (Google OAuth / OIDC). Auth is ACTIVE only when a client id is set —
     # so local dev runs open, and the deployment gates the whole app behind
     # login. Each logged-in user gets a private, session-scoped library that is

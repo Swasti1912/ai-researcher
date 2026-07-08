@@ -370,21 +370,37 @@ class KnowledgeBase:
 
     def cleanup_old_sessions(self) -> int:
         """
-        Evict stale sessions older than ``session_max_age_hours``.
+        Evict stale sessions (in-memory + Qdrant + persistent storage).
 
-        Persistence is the source of truth now: **persisted papers are never
-        auto-deleted** (only ephemeral, non-persisted sessions are). To remove a
-        persisted paper the user must explicitly delete it.
+        Two retention windows:
+          • non-persisted (ephemeral) sessions → ``session_max_age_hours``;
+          • persisted (on-disk Library) papers → ``persisted_retention_hours``
+            (set to 0 to keep persisted papers forever).
+
+        This bounds disk growth on a durable deployment and makes sure a user's
+        data doesn't linger indefinitely, while still surviving restarts within
+        the retention window. Explicit logout wipes a user's data immediately.
         """
         from app.config import get_settings
-        max_age = get_settings().session_max_age_hours
-        cutoff  = time.time() - max_age * 3600
-        stale   = [sid for sid, m in _sessions.items()
-                   if m.get("created_at", 0) < cutoff and not m.get("persisted")]
+        s = get_settings()
+        now = time.time()
+        eph_cutoff = now - s.session_max_age_hours * 3600
+        pers_hours = getattr(s, "persisted_retention_hours", 0) or 0
+        pers_cutoff = now - pers_hours * 3600 if pers_hours > 0 else None
+
+        stale = []
+        for sid, m in list(_sessions.items()):
+            created = m.get("created_at", 0)
+            if m.get("persisted"):
+                if pers_cutoff is not None and created < pers_cutoff:
+                    stale.append(sid)
+            elif created < eph_cutoff:
+                stale.append(sid)
+
         for sid in stale:
-            self.delete_session(sid)
+            self.delete_session(sid)   # removes memory + Qdrant + storage
         if stale:
-            _log.info("Cleaned stale (non-persisted) sessions", extra={"count": len(stale)})
+            _log.info("Cleaned stale sessions", extra={"count": len(stale)})
         return len(stale)
 
     def load_index(self) -> int:
