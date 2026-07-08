@@ -19,6 +19,12 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /code
 
+# git is required by HF Spaces "Dev Mode" (it injects `git config` + openvscode
+# stages on top of this image). The slim base omits it, which fails the build
+# with `git: not found` when Dev Mode is enabled. Harmless when it's off.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # CPU-only PyTorch first — an order of magnitude smaller than the default
 # CUDA build and all sentence-transformers needs on Spaces' free CPU tier.
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
