@@ -5,7 +5,6 @@ import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, t
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
-import Library from './Library';
 import HighlightsPanel from './HighlightsPanel';
 import NotesDock from './NotesDock';
 import Markdown from './Markdown';
@@ -380,10 +379,9 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
         </div>
       )}
 
-      {/* ── Library of saved papers (hidden when persistence is off) ── */}
-      {libraryEnabled && phase === 'upload' && !pendingSummarize && (
-        <Library onOpen={reopenPaper} refreshKey={libraryKey} />
-      )}
+      {/* No paper library: users only ever see the paper they're currently
+          working on. Past papers are never listed (privacy — no cross-account
+          exposure, and no browsable history). */}
 
       {/* ── Summarize-retry panel (shown when upload succeeded but summarize failed) ── */}
       {phase === 'upload' && pendingSummarize && (

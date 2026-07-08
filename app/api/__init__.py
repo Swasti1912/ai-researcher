@@ -1041,15 +1041,11 @@ async def llm_selftest():
 
 @router.get("/paper/library", response_model=LibraryResp)
 async def paper_library(request: Request):
-    if not _library_on():
-        return LibraryResp(papers=[])
-    from app import storage
-    from app.auth import owner_id
-    # Auth on → scope to the logged-in user; auth off → the shared "public" set.
-    owner = owner_id(request) if get_settings().auth_enabled else None
-    papers = await asyncio.to_thread(lambda: storage.list_papers(owner))
-    return LibraryResp(papers=[LibraryItem(**{**p, "has_pdf": bool(p.get("has_pdf")),
-                                              "has_summary": bool(p.get("has_summary"))}) for p in papers])
+    # No browsable library: users only ever work with their current paper. We
+    # never serve a list of past papers — this guarantees no cross-account
+    # exposure and no history. (Storage is still used to keep the *current*
+    # paper durable; it just isn't listed here.)
+    return LibraryResp(papers=[])
 
 
 @router.get("/paper/{session_id}/chat", response_model=ChatHistoryResp)
