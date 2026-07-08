@@ -1055,6 +1055,48 @@ async def client_config():
     }
 
 
+@router.get("/admin/logins")
+async def admin_logins(request: Request):
+    """Owner-only page listing user sign-ins. Access requires that the logged-in
+    user's email is in ADMIN_EMAILS. Anyone else (or unauthenticated) gets 404,
+    so the page's existence isn't revealed."""
+    import os, json, html
+    from fastapi.responses import HTMLResponse
+    from app.auth import current_user
+    s = get_settings()
+    admins = {e.strip().lower() for e in s.admin_emails.split(",") if e.strip()}
+    user = current_user(request) or {}
+    email = (user.get("email") or "").lower()
+    if not (s.auth_enabled and admins and email in admins):
+        raise HTTPException(404, "Not found")
+
+    path = os.path.join(s.data_dir, "logins.log")
+    rows = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try: rows.append(json.loads(line))
+                    except Exception: pass
+    rows.reverse()  # most recent first
+
+    body = "".join(
+        f"<tr><td>{html.escape(str(r.get('ts','')))}</td>"
+        f"<td>{html.escape(str(r.get('email','')))}</td>"
+        f"<td>{html.escape(str(r.get('name','')))}</td></tr>"
+        for r in rows[:2000]
+    ) or "<tr><td colspan=3>No sign-ins recorded yet.</td></tr>"
+    page = f"""<!doctype html><meta charset=utf-8><title>Sign-ins</title>
+    <style>body{{font-family:system-ui,sans-serif;margin:2rem;color:#2b2b2b}}
+    h1{{font-size:1.2rem}} table{{border-collapse:collapse;width:100%;max-width:760px}}
+    th,td{{text-align:left;padding:6px 12px;border-bottom:1px solid #e5e0d8;font-size:.9rem}}
+    th{{color:#7a736a}}</style>
+    <h1>User sign-ins &middot; {len(rows)} total</h1>
+    <table><tr><th>Time (UTC)</th><th>Email</th><th>Name</th></tr>{body}</table>"""
+    return HTMLResponse(page)
+
+
 @router.get("/llm-selftest")
 async def llm_selftest():
     """Diagnostic: call Groq and Gemini directly (tiny prompt) with the live

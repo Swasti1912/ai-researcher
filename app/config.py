@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     session_secret: str = "dev-insecure-session-secret-change-me"
+    # Comma-separated emails allowed to view the /api/admin/logins page.
+    admin_emails: str = ""
     # Public base URL for OAuth callbacks (e.g. https://<space>.hf.space).
     # Needed because HF's proxy hides the external scheme/host from the app.
     oauth_redirect_base: str = ""
