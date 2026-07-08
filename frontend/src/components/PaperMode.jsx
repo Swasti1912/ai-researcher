@@ -5,6 +5,7 @@ import { uploadPaper, summarizePaper, askPaper, deleteSession, visualizePaper, t
 import ConceptCards from './ConceptCards';
 import PaperTeacher from './PaperTeacher';
 import FiguresStrip from './FiguresStrip';
+import FigureModal from './FigureModal';
 import HighlightsPanel from './HighlightsPanel';
 import NotesDock from './NotesDock';
 import Markdown from './Markdown';
@@ -70,6 +71,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
 
   const locateInPdf = (text, page) => pdfPaneRef.current?.scrollToText?.(text, page ? { page } : {});
   const locatePage = (page) => pdfPaneRef.current?.scrollToPage?.(page);
+  const [activeFigure, setActiveFigure] = useState(null);   // figure open in the explain modal
 
   // ── Highlights (persisted) ────────────────────────────────────────
   const handleCreateHighlight = async ({ page, rects, quote, color = 'yellow', note = '' }) => {
@@ -557,7 +559,7 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
           </div>
 
           {/* ── Figures & tables (P1) ── */}
-          <FiguresStrip sessionId={sessionId} onLocate={locatePage} />
+          <FiguresStrip sessionId={sessionId} onLocate={locatePage} onExplain={setActiveFigure} />
 
           {/* ── Highlights & notes (P2; hidden when persistence is off) ── */}
           {libraryEnabled && hasPdf && (
@@ -596,8 +598,18 @@ export default function PaperMode({ openRequest = null, onConsumed, onBack }) {
               sessionId={sessionId}
               onLocate={locateInPdf}
               onLocatePage={locatePage}
+              onExplainFigure={setActiveFigure}
               onSave={(sec, body) => note.add(`Section · ${sec}`, body)}
               onClose={() => setTeachOpen(false)}
+            />
+          )}
+
+          {activeFigure && (
+            <FigureModal
+              figure={activeFigure}
+              sessionId={sessionId}
+              onClose={() => setActiveFigure(null)}
+              onLocate={locatePage}
             />
           )}
 

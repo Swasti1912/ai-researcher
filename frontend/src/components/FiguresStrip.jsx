@@ -7,7 +7,7 @@ import { getPaperFigures, paperFigureUrl } from '../services/api';
  * Click a figure → onLocate(page) scrolls the PDF pane to that page.
  * Renders nothing if the paper has no figures (txt/md or figure-less PDF).
  */
-export default function FiguresStrip({ sessionId, onLocate }) {
+export default function FiguresStrip({ sessionId, onLocate, onExplain }) {
   const [figures, setFigures] = useState([]);
 
   useEffect(() => {
@@ -28,18 +28,21 @@ export default function FiguresStrip({ sessionId, onLocate }) {
       </div>
       <div className="figures-strip">
         {figures.map((f) => (
-          <button key={f.fig_id} className="figure-card" title={f.caption || `Page ${f.page}`}
-            onClick={() => onLocate?.(f.page)}>
-            <div className="figure-thumb">
-              {f.kind === 'table' ? (
-                <div className="figure-table-ph"><Table2 size={26} /></div>
-              ) : (
-                <img src={paperFigureUrl(sessionId, f.fig_id)} loading="lazy" alt={f.caption || 'figure'} />
-              )}
-            </div>
-            <div className="figure-caption">{f.caption || `Page ${f.page}`}</div>
-            <div className="figure-page">p{f.page}</div>
-          </button>
+          <div key={f.fig_id} className="figure-card">
+            <button className="figure-card-main" title="Explain this figure"
+              onClick={() => onExplain?.(f)}>
+              <div className="figure-thumb">
+                {f.kind === 'table' ? (
+                  <div className="figure-table-ph"><Table2 size={26} /></div>
+                ) : (
+                  <img src={paperFigureUrl(sessionId, f.fig_id)} loading="lazy" alt={f.caption || 'figure'} />
+                )}
+              </div>
+              <div className="figure-caption">{f.caption || `Page ${f.page}`}</div>
+            </button>
+            <button className="figure-page" title="Go to this page in the PDF"
+              onClick={() => onLocate?.(f.page)}>p{f.page}</button>
+          </div>
         ))}
       </div>
     </div>

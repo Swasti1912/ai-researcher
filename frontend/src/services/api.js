@@ -60,6 +60,11 @@ export const teachPaper = (sessionId) =>
 export const teachSection = (sessionId, section, summary) =>
   runJob('/paper/teach-section/start', { session_id: sessionId, section, summary });
 
+// Vision explanation of a single figure (+ follow-up Q&A).
+// history: [{role:'user'|'assistant', content}] for follow-ups; omit for the first call.
+export const explainFigure = (sessionId, figId, question = null, history = null) =>
+  runJob('/paper/figure-explain/start', { session_id: sessionId, fig_id: figId, question, history });
+
 export const fetchPaperFromUrl = (url, abstract, title) =>
   http.post('/paper/from-url', { url, abstract, title }, { timeout: 60_000 }).then(r => r.data);
 

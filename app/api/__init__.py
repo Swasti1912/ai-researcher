@@ -255,6 +255,16 @@ class TeachSectionResp(BaseModel):
     figures: List[Dict[str, Any]] = []   # [{fig_id, page, caption, kind}]
     pages: List[int] = []
 
+class FigureExplainReq(BaseModel):
+    session_id: str
+    fig_id: str
+    question: Optional[str] = None                 # None → initial explanation
+    history: Optional[List[Dict[str, str]]] = None # [{role, content}] for follow-ups
+
+class FigureExplainResp(BaseModel):
+    fig_id: str = ""
+    explanation: str = ""
+
 # ── Library / persistence (P2) ────────────────────────────────────────────────
 class LibraryItem(BaseModel):
     session_id: str
@@ -884,6 +894,26 @@ async def teach_section_start(req: TeachSectionReq, request: Request):
 async def ask_paper_start(req: PaperAskReq, request: Request):
     await _guard_session(request, req.session_id)
     return JobStartResp(job_id=_start_job(ask_paper(req, request)))
+
+
+async def _explain_figure(req: FigureExplainReq) -> FigureExplainResp:
+    """Vision explanation (or follow-up answer) for a single figure."""
+    # Screen follow-up questions like Paper Q&A does (inappropriate/unrelated).
+    if req.question:
+        from app.guardrails import screen
+        allowed, msg = await screen(req.question, "question")
+        if not allowed:
+            return FigureExplainResp(fig_id=req.fig_id, explanation=msg)
+    from app.agents.figure_explainer import FigureExplainerAgent
+    agent = FigureExplainerAgent()
+    result = await agent.explain(req.session_id, req.fig_id, req.question, req.history)
+    return FigureExplainResp(**result)
+
+
+@router.post("/paper/figure-explain/start", response_model=JobStartResp)
+async def figure_explain_start(req: FigureExplainReq, request: Request):
+    await _guard_session(request, req.session_id)
+    return JobStartResp(job_id=_start_job(_explain_figure(req)))
 
 
 @router.post("/research/start", response_model=JobStartResp)

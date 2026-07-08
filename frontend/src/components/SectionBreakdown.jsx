@@ -11,19 +11,19 @@ import Markdown from './Markdown';
  *   onLocate(text)      — jump PDF to the section heading
  *   onLocatePage(page)  — jump PDF to a figure's page
  */
-export default function SectionBreakdown({ sections = [], sessionId, onLocate, onLocatePage, onSave }) {
+export default function SectionBreakdown({ sections = [], sessionId, onLocate, onLocatePage, onSave, onExplainFigure }) {
   if (!sections.length) return null;
   return (
     <div className="paper-sections-list">
       {sections.map((s, i) => (
         <SectionItem key={i} section={s} sessionId={sessionId}
-          onLocate={onLocate} onLocatePage={onLocatePage} onSave={onSave} />
+          onLocate={onLocate} onLocatePage={onLocatePage} onSave={onSave} onExplainFigure={onExplainFigure} />
       ))}
     </div>
   );
 }
 
-function SectionItem({ section, sessionId, onLocate, onLocatePage, onSave }) {
+function SectionItem({ section, sessionId, onLocate, onLocatePage, onSave, onExplainFigure }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -85,11 +85,11 @@ function SectionItem({ section, sessionId, onLocate, onLocatePage, onSave }) {
 
               {data.figures?.length > 0 && (
                 <div className="section-figs">
-                  <div className="section-figs-title">Figures in this section</div>
+                  <div className="section-figs-title">Figures in this section · click to explain</div>
                   <div className="section-figs-grid">
                     {data.figures.map((f) => (
-                      <button key={f.fig_id} className="section-fig" title={f.caption || `Page ${f.page}`}
-                        onClick={() => onLocatePage?.(f.page)}>
+                      <button key={f.fig_id} className="section-fig" title="Explain this figure"
+                        onClick={() => (onExplainFigure ? onExplainFigure(f) : onLocatePage?.(f.page))}>
                         <div className="section-fig-thumb">
                           {f.kind === 'table' || !f.fig_id.startsWith('fig')
                             ? <div className="figure-table-ph"><Table2 size={22} /></div>
