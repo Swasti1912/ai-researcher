@@ -981,6 +981,18 @@ async def delete_session(session_id: str):
     return SessionDeleteResp(session_id=session_id, chunks_deleted=deleted)
 
 
+@router.post("/paper/session/{session_id}/end", response_model=SessionDeleteResp)
+async def end_session(session_id: str):
+    """Delete a session — POST variant for navigator.sendBeacon() on tab close.
+
+    sendBeacon can only issue POST, so the frontend fires this on `pagehide`
+    to wipe the user's paper the moment they leave. Idempotent.
+    """
+    deleted = get_kb().delete_session(session_id)
+    _log.info("Session ended (beacon)", extra={"session_id": session_id, "chunks": deleted})
+    return SessionDeleteResp(session_id=session_id, chunks_deleted=deleted)
+
+
 @router.delete("/paper/session/cleanup", response_model=Dict[str, Any])
 async def cleanup_sessions():
     """Evict stale non-persisted sessions (persisted papers are never auto-deleted)."""

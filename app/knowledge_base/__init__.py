@@ -59,12 +59,20 @@ def _get_client():
         from app.config import get_settings
         s = get_settings()
         if s.qdrant_url == ":memory:":
-            # On-disk local Qdrant so vectors survive restart (P2). NOTE: this
-            # takes an exclusive single-process lock — run one worker, no --reload.
-            path = s.qdrant_path or os.path.join(s.data_dir, "qdrant")
-            os.makedirs(path, exist_ok=True)
-            _log.info("Connecting to Qdrant (on-disk)", extra={"path": path})
-            _qdrant_client = QdrantClient(path=path)
+            if not s.enable_library:
+                # Fully ephemeral (Library off): keep paper chunks in RAM only —
+                # nothing is written to disk, so a session leaves no trace once
+                # the process ends or the session is cleaned up.
+                _log.info("Connecting to Qdrant (in-memory, ephemeral)")
+                _qdrant_client = QdrantClient(location=":memory:")
+            else:
+                # On-disk local Qdrant so the Library survives restart (P2). NOTE:
+                # this takes an exclusive single-process lock — run one worker,
+                # no --reload.
+                path = s.qdrant_path or os.path.join(s.data_dir, "qdrant")
+                os.makedirs(path, exist_ok=True)
+                _log.info("Connecting to Qdrant (on-disk)", extra={"path": path})
+                _qdrant_client = QdrantClient(path=path)
         else:
             _log.info("Connecting to Qdrant", extra={"url": s.qdrant_url})
             _qdrant_client = QdrantClient(location=s.qdrant_url)

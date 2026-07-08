@@ -49,7 +49,23 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
     except Exception as exc:
         log.warning("Storage init/load failed (non-fatal)", extra={"err": str(exc)})
 
+    # Periodic idle-session sweeper: evicts in-memory sessions past the TTL so
+    # abandoned uploads don't linger (persisted Library papers are exempt).
+    async def _sweeper() -> None:
+        from app.knowledge_base import get_kb
+        while True:
+            await asyncio.sleep(600)  # every 10 minutes
+            try:
+                n = await asyncio.to_thread(get_kb().cleanup_old_sessions)
+                if n:
+                    log.info("Idle sweeper evicted sessions", extra={"count": n})
+            except Exception as exc:
+                log.warning("Idle sweeper failed", extra={"err": str(exc)})
+
+    sweeper_task = asyncio.create_task(_sweeper())
+
     yield
+    sweeper_task.cancel()
     log.info("Shutdown")
 
 
